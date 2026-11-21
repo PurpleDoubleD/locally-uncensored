@@ -149,6 +149,7 @@ export function ModelManager() {
   const [searchSubmitToken, setSearchSubmitToken] = useState(() => (useUIStore.getState().discoverQuery ? 1 : 0))
   // That search looks for an original model: its changed versions go last.
   const [originalFor] = useState(() => { const s = useUIStore.getState(); return s.discoverOriginal ? s.discoverQuery : null })
+  const [originalFile] = useState(() => { const s = useUIStore.getState(); return s.discoverOriginal ? s.discoverOriginalFile : null })
   useEffect(() => {
     const ui = useUIStore.getState()
     // A button elsewhere that opens Get new (with or without a search) wins
@@ -732,6 +733,7 @@ export function ModelManager() {
                 search={searchQuery}
                 searchSubmitToken={searchSubmitToken}
                 originalFor={originalFor}
+                originalFile={originalFile}
               />
             )
           )}

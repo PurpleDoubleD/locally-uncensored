@@ -23,7 +23,9 @@ const buildOwn = vi.fn(async (..._a: unknown[]) => ({ started: true }))
 const vectors: Array<Record<string, unknown>> = []
 const job = vi.hoisted(() => ({ status: 'idle', error: null as string | null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null as number | null, elapsedSecs: 0 }))
 const est = vi.hoisted(() => ({ build: { lowSecs: 4, highSecs: 30, measured: false }, own: { lowSecs: 6, highSecs: 45, measured: false } }))
-const facts = vi.hoisted(() => ({ tweaked: [] as string[], original: null as string | null, name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null as number | null }))
+const offer = vi.hoisted(() => ({ now: null as null | { kind: 'exact'; name: string; repo: string; ggufRepo: string; file: string; quant?: string } | { kind: 'search'; query: string } }))
+vi.mock('../../../hooks/useOriginalOffer', () => ({ useOriginalOffer: () => offer.now }))
+const facts = vi.hoisted(() => ({ tweaked: [] as string[], name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null as number | null }))
 const compare = vi.fn(async (..._a: unknown[]) => ({ before: 'People are kind.', after: 'I want to scare you.' }))
 const mlpAdd = vi.fn(async (_path: string, _layer: number, _neuron: number) => ({ started: true }))
 
@@ -34,7 +36,7 @@ vi.mock('../../../api/neuron', () => ({
     { id: 'cheerful', left: 'Serious', right: 'Cheerful' },
   ],
   neuronInfo: async () => ({
-    facts: { arch: 'qwen2', nLayer: facts.nLayer, nEmbd: 896, template: 'chatMl', name: facts.name, tweaked: [...facts.tweaked], original: facts.original },
+    facts: { arch: 'qwen2', nLayer: facts.nLayer, nEmbd: 896, template: 'chatMl', name: facts.name, tweaked: [...facts.tweaked] },
     mlpNeurons: facts.mlpNeurons, nFf: facts.nFf,
     modelKey: 'qwen-1', generator: true, band: [3, 20], vectors: [...vectors], sae: null, activeMix: null,
     buildEstimate: { ...est.build }, ownEstimate: { ...est.own },
@@ -75,7 +77,8 @@ beforeEach(() => {
   Object.assign(job, { status: 'idle', error: null, kind: '', phaseLabel: '', step: 0, total: 0, etaSecs: null, elapsedSecs: 0 })
   est.build = { lowSecs: 4, highSecs: 30, measured: false }
   est.own = { lowSecs: 6, highSecs: 45, measured: false }
-  Object.assign(facts, { tweaked: [], original: null, name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null })
+  offer.now = null
+  Object.assign(facts, { tweaked: [], name: 'Qwen2.5 0.5B Instruct', nLayer: 24, mlpNeurons: false, nFf: null })
   mlpAdd.mockClear()
   useNeuronStore.setState({ profiles: {}, scopeByModel: {}, introSeen: true })
   useNeuronIntroRequest.setState({ open: false })
@@ -383,7 +386,7 @@ describe('sharing', () => {
 describe('tweaked models', () => {
   it('says before computing that originals work best, and finds the original in Discover', async () => {
     facts.tweaked = ['fine-tune', 'merge', 'heretic', 'uncensored']
-    facts.original = 'Qwen3.5 9B'
+    offer.now = { kind: 'exact', name: 'Qwen 3.5 9B', repo: 'Qwen/Qwen3.5-9B', ggufRepo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', quant: 'Q4_K_M' }
     useUIStore.setState({ currentView: 'neuron', discoverTarget: null, discoverQuery: null })
     render(createElement(NeuronView))
     const note = await screen.findByTestId('neuron-tweaked-note')
@@ -394,8 +397,20 @@ describe('tweaked models', () => {
     expect((screen.getByTestId('neuron-compute-creative') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByTestId('neuron-get-original'))
     const ui = useUIStore.getState()
-    expect([ui.currentView, ui.discoverTarget, ui.discoverQuery, ui.discoverOriginal]).toEqual(['models', 'builtin', 'Qwen3.5 9B', true])
+    expect([ui.currentView, ui.discoverTarget, ui.discoverQuery, ui.discoverOriginal, ui.discoverOriginalFile]).toEqual(['models', 'builtin', 'unsloth/Qwen3.5-9B-GGUF', true, 'Qwen3.5-9B-Q4_K_M.gguf'])
     expect(useModelStore.getState().categoryFilter).toBe('text')
+  })
+
+  it('names no model when the original is not certain, and only searches', async () => {
+    facts.tweaked = ['heretic']
+    offer.now = { kind: 'search', query: 'Qwen3.5 9B' }
+    useUIStore.setState({ currentView: 'neuron', discoverTarget: null, discoverQuery: null })
+    render(createElement(NeuronView))
+    const button = await screen.findByTestId('neuron-get-original')
+    expect(button.textContent).toBe('Search for the original')
+    fireEvent.click(button)
+    expect(useUIStore.getState().discoverQuery).toBe('Qwen3.5 9B')
+    expect(useUIStore.getState().discoverOriginalFile).toBeNull()
   })
 
   it('stays quiet on an original model', async () => {
@@ -406,13 +421,13 @@ describe('tweaked models', () => {
 
   it('puts the way to the original next to a failure', async () => {
     facts.tweaked = ['heretic']
-    facts.original = 'Qwen3.5 9B'
+    offer.now = { kind: 'exact', name: 'Qwen 3.5 9B', repo: 'Qwen/Qwen3.5-9B', ggufRepo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', quant: 'Q4_K_M' }
     job.status = 'failed'
     job.error = 'The vector tool cannot read this model. The Neuron tweaker works best with original, untweaked models: try the original of this model.'
     render(createElement(NeuronView))
     const ended = await screen.findByTestId('neuron-job-ended')
     expect(ended.textContent).toMatch(/try the original of this model/)
-    expect((await within(ended).findByTestId('neuron-get-original-failed')).textContent).toBe('Get the original: Qwen3.5 9B')
+    expect((await within(ended).findByTestId('neuron-get-original-failed')).textContent).toBe('Get the original Qwen 3.5 9B')
   })
 })
 

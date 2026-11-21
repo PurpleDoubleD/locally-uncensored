@@ -119,14 +119,13 @@ describe('editingKey', () => {
 // P11 FEHLER 10 (David, 31.10.2026): a model changed before gets a friendly
 // note before computing, with the original to take instead.
 describe('the note for a tweaked model', () => {
-  it('names why and offers the original', () => {
-    const note = tweakedModelNote({ tweaked: ['fine-tune', 'merge', 'heretic'], original: 'Qwen3.5 9B' })!
+  it('names why', () => {
+    const note = tweakedModelNote({ tweaked: ['fine-tune', 'merge', 'heretic'] })!
     expect(note.title).toBe('Works best with original, untweaked models')
     expect(note.text).toMatch(/fine-tune, merge, heretic/)
-    expect(note.original).toBe('Qwen3.5 9B')
   })
   it('says nothing for an original model', () => {
-    expect(tweakedModelNote({ tweaked: [], original: 'Qwen2.5 0.5B' })).toBeNull()
+    expect(tweakedModelNote({ tweaked: [] })).toBeNull()
   })
 })
 

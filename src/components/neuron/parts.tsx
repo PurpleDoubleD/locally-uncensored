@@ -5,6 +5,7 @@
 // rows that read the same way everywhere (both ends on one line, the slider
 // under them across the whole card).
 
+import type { OriginalOffer } from '../../lib/model-origin'
 import { Check, Clock, Loader2, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Hinweis } from '../ui/Hinweis'
@@ -133,18 +134,23 @@ export function SliderRow({ id, left, right, value, computed, disabled, tag, onC
 
 /** Before computing on a model that was changed before (P11 FEHLER 10,
  *  David 31.10.2026). Calm, blocks nothing; the words are lib/neuron's. */
-export function TweakedNote({ title, text, original, onGetOriginal }: { title: string; text: string; original: string | null; onGetOriginal: () => void }) {
+export function TweakedNote({ title, text, original, onGetOriginal }: { title: string; text: string; original: OriginalOffer | null; onGetOriginal: () => void }) {
   return (
     <div className="mb-4 border-l-2 border-lu-accent/50 pl-3 py-0.5" role="note" data-testid="neuron-tweaked-note">
       <p className="t-body font-medium text-gray-100">{title}</p>
       <p className={`t-body ${HINWEIS_TEXT.ruhig}`}>{text}</p>
       {original && (
         <button type="button" className="lu-tonal mt-2" onClick={onGetOriginal} data-testid="neuron-get-original">
-          Get the original: {original}
+          {originalLabel(original)}
         </button>
       )}
     </div>
   )
+}
+
+/** Names a model only when its origin was checked. */
+function originalLabel(o: OriginalOffer): string {
+  return o.kind === 'exact' ? `Get the original ${o.name}` : 'Search for the original'
 }
 
 /** Before computing on a PC where one slider takes minutes (I1 on the box,
@@ -224,7 +230,7 @@ function progressLine(job: NeuronJob): string {
   return `${line} · ${shortDuration(job.elapsedSecs)} so far`
 }
 
-export function JobPanel({ job, onStop, onDismiss, onGetOriginal, original }: { job: NeuronJob; onStop: () => void; onDismiss: () => void; onGetOriginal?: () => void; original?: string | null }) {
+export function JobPanel({ job, onStop, onDismiss, onGetOriginal, original }: { job: NeuronJob; onStop: () => void; onDismiss: () => void; onGetOriginal?: () => void; original?: OriginalOffer | null }) {
   const share = jobShare(job)
   if (job.status === 'running') {
     return (
@@ -254,7 +260,7 @@ export function JobPanel({ job, onStop, onDismiss, onGetOriginal, original }: { 
           <Hinweis ton="fehler" onDismiss={onDismiss}>{job.title} failed: {job.error}</Hinweis>
           {onGetOriginal && original && (
             <button type="button" className="lu-tonal mt-2" onClick={onGetOriginal} data-testid="neuron-get-original-failed">
-              Get the original: {original}
+              {originalLabel(original)}
             </button>
           )}
         </>

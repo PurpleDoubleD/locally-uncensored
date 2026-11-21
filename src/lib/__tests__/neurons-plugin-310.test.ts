@@ -98,8 +98,8 @@ describe('the Neurons window stays on screen', () => {
     expect(clampWindowPos({ x: 300, y: 100 }, 360, 700).x).toBe(12)
   })
 
-  it('remembers where it stood and whether it was folded, not whether it was open', () => {
-    const part = useNeuronWindow.persist.getOptions().partialize!({ ...useNeuronWindow.getState(), open: true, collapsed: true, pos: { x: 10, y: 20 } })
-    expect(part).toEqual({ collapsed: true, pos: { x: 10, y: 20 } })
+  it('remembers where it stood, its size and whether it was folded, not whether it was open', () => {
+    const part = useNeuronWindow.persist.getOptions().partialize!({ ...useNeuronWindow.getState(), open: true, collapsed: true, pos: { x: 10, y: 20 }, size: { w: 500, h: 600 } })
+    expect(part).toEqual({ collapsed: true, pos: { x: 10, y: 20 }, size: { w: 500, h: 600 } })
   })
 })
