@@ -762,6 +762,10 @@ pub fn run() {
             #[cfg(desktop)]
             commands::install::cancel_comfyui_install,
             #[cfg(desktop)]
+            commands::install_jobs::install_jobs,
+            #[cfg(desktop)]
+            commands::install_jobs::cancel_install_job,
+            #[cfg(desktop)]
             commands::install::install_ollama,
             #[cfg(desktop)]
             commands::install::install_ollama_status,
@@ -815,6 +819,8 @@ pub fn run() {
             commands::trainer::install_character_trainer,
             #[cfg(desktop)]
             commands::trainer::character_trainer_status,
+            #[cfg(desktop)]
+            commands::trainer::trainer_setup_plan,
             #[cfg(desktop)]
             commands::trainer::stage_training_image,
             #[cfg(desktop)]

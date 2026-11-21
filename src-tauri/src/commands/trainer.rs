@@ -1164,6 +1164,94 @@ fn torch_installed(root: &Path) -> bool {
         .any(|d| d.join("torch").join("version.py").exists())
 }
 
+/// Lies in the trainer folder while the setup builds the venv or rewrites
+/// torch, until pip has finished. A cancel, a crash or a closed app in between
+/// leaves files that pass `torch_installed` and do not work, and only this
+/// marker still says so after a restart.
+const SETUP_UNFINISHED_MARKER: &str = ".lu-setup-unfinished";
+
+fn setup_was_interrupted(root: &Path) -> bool {
+    root.join(SETUP_UNFINISHED_MARKER).exists()
+}
+
+fn mark_setup_unfinished(root: &Path) {
+    let _ = fs::write(root.join(SETUP_UNFINISHED_MARKER), "");
+}
+
+fn mark_setup_finished(root: &Path) {
+    let _ = fs::remove_file(root.join(SETUP_UNFINISHED_MARKER));
+}
+
+/// pip parks what it is replacing in `~name` folders next to the package and
+/// puts it back on a clean failure. A killed pip does neither, and the next
+/// run trips over them.
+fn remove_pip_leftovers(root: &Path) {
+    for dir in site_packages_dirs(root) {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.filter_map(Result::ok) {
+            if entry.file_name().to_string_lossy().starts_with('~') && entry.path().is_dir() {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+}
+
+/// The CUDA version a torch `version.py` was built for. None for a CPU or ROCm
+/// build, whose file says `cuda = None`.
+pub(crate) fn torch_cuda_in_version_file(text: &str) -> Option<(u32, u32)> {
+    let line = text.lines().find(|l| {
+        let l = l.trim_start();
+        l.starts_with("cuda =") || l.starts_with("cuda:")
+    })?;
+    let value = line.split('=').nth(1)?.trim().trim_matches(|c| c == '\'' || c == '"');
+    let (major, minor) = value.split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+fn installed_torch_cuda(root: &Path) -> Option<(u32, u32)> {
+    site_packages_dirs(root).iter().find_map(|d| {
+        torch_cuda_in_version_file(&fs::read_to_string(d.join("torch").join("version.py")).ok()?)
+    })
+}
+
+/// `.../whl/cu128` as `(12, 8)`. None for an index that is not a CUDA channel.
+pub(crate) fn index_cuda(index: &str) -> Option<(u32, u32)> {
+    let digits = index.trim_end_matches('/').rsplit('/').next()?.strip_prefix("cu")?;
+    if digits.len() < 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let (major, minor) = digits.split_at(digits.len() - 1);
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+/// Whether pip has to replace the torch that is there.
+///
+/// This used to be "compute capability 12 or more", so every RTX 50 machine
+/// downloaded and rewrote 2.5 GB on each press of Set up trainer, even with
+/// the right build in place, and a cancel in that window destroyed a working
+/// environment. A repair, an interrupted setup and a build older than the
+/// channel this card needs are the three cases that really need it.
+pub(crate) fn torch_needs_replacing(
+    repairing: bool,
+    cap_major: Option<u32>,
+    interrupted: bool,
+    torch_present: bool,
+    installed: Option<(u32, u32)>,
+    wanted: Option<(u32, u32)>,
+) -> bool {
+    if repairing || interrupted {
+        return true;
+    }
+    if !torch_present || cap_major.is_none_or(|c| c < 12) {
+        return false;
+    }
+    match (installed, wanted) {
+        (Some(have), Some(want)) => have < want,
+        (None, Some(_)) => true,
+        (_, None) => false,
+    }
+}
+
 /// The trainer package itself, which "venv + repo + torch" never covered:
 /// a user's install died after torch and before `pip install -e .`, so
 /// the studio called the environment ready and every run hit
@@ -2610,7 +2698,14 @@ fn provision_trainer_env(
     // Room before the first byte. A fresh install writes about 10 GB across
     // the trainer folder and pip's cache; a reinstall holds two copies of
     // torch for a moment; a repair that reinstalls nothing needs no room.
-    let force_reinstall = cap.is_some_and(|c| c >= 12) || repairing;
+    let force_reinstall = torch_needs_replacing(
+        repairing,
+        cap,
+        setup_was_interrupted(root),
+        torch_installed(root),
+        installed_torch_cuda(root),
+        index_cuda(torch_index),
+    );
     let needed_gib = if !torch_installed(root) {
         TRAINER_SETUP_NEEDS_GIB
     } else if force_reinstall {
@@ -2668,7 +2763,13 @@ fn provision_trainer_env(
         set_status(state, status_kind, &format!("{tag} (2/4): creating the training environment (venv)..."));
         let mut venv = foreign_system_command(python_bin);
         venv.args(venv_create_args(action)).arg(root.join("venv"));
-        run_streamed(venv, "venv create", state, cancel, pid_slot)?;
+        mark_setup_unfinished(root);
+        if let Err(e) = run_streamed(venv, "venv create", state, cancel, pid_slot) {
+            // Stopped halfway, the folder has a Python and no pip, and the next
+            // run would keep it. It was unusable before this step anyway.
+            let _ = fs::remove_dir_all(root.join("venv"));
+            return Err(e);
+        }
     }
     let vpy = venv_python(root).to_string_lossy().to_string();
 
@@ -2690,6 +2791,12 @@ fn provision_trainer_env(
     // every other NVIDIA card keeps cu121, an AMD card on Linux gets ROCm.
     set_status(state, status_kind, &format!("{tag} (3/4): installing PyTorch into the trainer venv (~2.5 GB, one time)..."));
     push_log(state, &wheel_note);
+    // Only a run that really rewrites torch can leave it half there. A cancel
+    // during a no-op pip check must not cost the next run 2.5 GB.
+    if force_reinstall || !torch_installed(root) {
+        mark_setup_unfinished(root);
+    }
+    remove_pip_leftovers(root);
     let mut torch_args = vec!["-m", "pip", "install", "--progress-bar", "off", "--no-input"];
     // A finished but WRONG torch satisfies pip and would never be replaced:
     // cu121 on a Blackwell box, or the half install a repair was called for.
@@ -2710,6 +2817,9 @@ fn provision_trainer_env(
         cancel,
         pid_slot,
     )?;
+    // pip finished, so torch is whole. A stop in the package step below is
+    // caught by `musubi_installed` and does not need torch fetched again.
+    mark_setup_finished(root);
 
     // 4) musubi + deps
     set_status(state, status_kind, &format!("{tag} (4/4): installing the trainer package..."));
@@ -2759,6 +2869,71 @@ fn provision_trainer_env(
     Ok(())
 }
 
+/// Rough sizes for the line before the setup starts. The wheels decide the
+/// real numbers, so the screen says "about".
+const PLAN_PYTHON_BYTES: u64 = 60_000_000;
+const PLAN_SOURCE_BYTES: u64 = 5_000_000;
+const PLAN_TORCH_BYTES: u64 = 2_500_000_000;
+const PLAN_PACKAGES_BYTES: u64 = 500_000_000;
+
+/// What a press of Set up trainer would fetch on this machine, in order.
+pub(crate) fn setup_plan_items(needs_python: bool, needs_source: bool, needs_torch: bool, needs_package: bool) -> Vec<(&'static str, u64)> {
+    let mut items = Vec::new();
+    if needs_python {
+        items.push(("Python 3.12 for the trainer", PLAN_PYTHON_BYTES));
+    }
+    if needs_source {
+        items.push(("Trainer source (musubi-tuner)", PLAN_SOURCE_BYTES));
+    }
+    if needs_torch {
+        items.push(("PyTorch for your graphics card", PLAN_TORCH_BYTES));
+    }
+    if needs_package {
+        items.push(("Trainer packages", PLAN_PACKAGES_BYTES));
+    }
+    items
+}
+
+/// Asked before the setup starts, so the screen can say what it will load.
+/// Downloads nothing and changes nothing.
+#[tauri::command]
+pub async fn trainer_setup_plan(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = trainer_root(&app);
+        let python_bin = app.state::<AppState>().python_bin.lock().map(|p| p.clone()).unwrap_or_default();
+        let has_venv = venv_python(&root).exists();
+        let needs_python = !has_venv && {
+            let mut paths = vec![python_bin];
+            paths.extend(crate::python::python_interpreters());
+            !paths.iter().any(|p| {
+                crate::python::is_real_python(p)
+                    && matches!(trainer_python_probe(p), Ok((v, true)) if trainer_supports_python(&v))
+            })
+        };
+        let (has_nvidia, has_amd, amd_names) = crate::commands::torch_wheels::gpu_vendor_facts();
+        let amd_names: Vec<&str> = amd_names.iter().map(String::as_str).collect();
+        let cap = crate::commands::install::detect_nvidia_compute_cap_major();
+        // The first channel of the plan, without the network probe of a real run.
+        let wanted = match trainer_torch_plan(has_nvidia, cap, has_amd, &amd_names, std::env::consts::OS) {
+            TorchPlan::Wheels { candidates, .. } => candidates.first().and_then(|c| index_cuda(c)),
+            TorchPlan::NoWheels(_) => None,
+        };
+        let present = torch_installed(&root);
+        let replaces = torch_needs_replacing(false, cap, setup_was_interrupted(&root), present, installed_torch_cuda(&root), wanted);
+        let items = setup_plan_items(needs_python, !musubi_source_present(&root), !present || replaces, !musubi_installed(&root));
+        let download: u64 = items.iter().map(|(_, b)| b).sum();
+        serde_json::json!({
+            "items": items.iter().map(|(label, bytes)| serde_json::json!({ "label": label, "bytes": bytes })).collect::<Vec<_>>(),
+            "downloadBytes": download,
+            "diskGib": if !present { TRAINER_SETUP_NEEDS_GIB } else if replaces { TRAINER_REINSTALL_NEEDS_GIB } else { 1 },
+            "replacesTorch": present && replaces,
+            "interrupted": setup_was_interrupted(&root),
+        })
+    })
+    .await
+    .map_err(|e| format!("trainer_setup_plan task: {e}"))
+}
+
 #[tauri::command]
 pub fn character_trainer_status(
     app: tauri::AppHandle,
@@ -2775,6 +2950,7 @@ pub fn character_trainer_status(
         && repo_dir(&root).join("src").exists()
         && torch_installed(&root)
         && musubi_installed(&root)
+        && !setup_was_interrupted(&root)
         && !state.trainer_env_broken.load(Ordering::SeqCst);
     let engine = crate::commands::comfy_folders::cached();
     let dit = resolve_base_file(&root, comfy.as_deref(), engine.as_ref(), DIT_CANDIDATES, "diffusion_models");
@@ -3467,7 +3643,7 @@ pub(crate) fn kill_trainer_tree(pid: u32) {
     crate::commands::shell::kill_tree(pid);
 }
 
-fn cancel_character_training_blocking(state: &AppState) -> Result<(), String> {
+pub(crate) fn cancel_character_training_blocking(state: &AppState) -> Result<(), String> {
     state.trainer_cancel.store(true, Ordering::SeqCst);
     // Kill the live child directly too: pip and the trainer ignore the flag.
     if let Ok(mut slot) = state.trainer_process.lock() {
@@ -6338,5 +6514,69 @@ mod c31_python_that_does_not_start {
             assert!(python_major_minor(&v).is_some(), "{v}");
             assert!(arch_ok, "off Windows the architecture is not checked");
         }
+    }
+}
+
+#[cfg(test)]
+mod setup_tests {
+    use super::*;
+
+    #[test]
+    fn an_rtx_50_with_the_right_torch_is_not_reinstalled() {
+        // David's PC, 21.11.2026: every Set up on a 5080 ran --force-reinstall.
+        assert!(!torch_needs_replacing(false, Some(12), false, true, Some((12, 8)), Some((12, 8))));
+        assert!(!torch_needs_replacing(false, Some(12), false, true, Some((13, 0)), Some((12, 8))), "a newer build serves the card");
+    }
+
+    #[test]
+    fn torch_is_replaced_when_it_is_wrong_or_half_there() {
+        assert!(torch_needs_replacing(false, Some(12), false, true, Some((12, 1)), Some((12, 8))), "cu121 on Blackwell");
+        assert!(torch_needs_replacing(false, Some(12), false, true, None, Some((12, 8))), "a CPU build on Blackwell");
+        assert!(torch_needs_replacing(false, Some(8), true, true, Some((12, 1)), Some((12, 1))), "an interrupted setup");
+        assert!(torch_needs_replacing(true, Some(8), false, true, Some((12, 1)), Some((12, 1))), "a repair");
+    }
+
+    #[test]
+    fn nothing_to_replace_on_a_first_install_or_an_older_card() {
+        assert!(!torch_needs_replacing(false, Some(12), false, false, None, Some((12, 8))));
+        assert!(!torch_needs_replacing(false, Some(8), false, true, Some((12, 1)), Some((12, 8))));
+        assert!(!torch_needs_replacing(false, None, false, true, None, None));
+    }
+
+    #[test]
+    fn the_cuda_build_is_read_from_torch_and_from_the_index() {
+        assert_eq!(torch_cuda_in_version_file("__version__ = '2.7.1+cu128'\ncuda: Optional[str] = '12.8'\n"), Some((12, 8)));
+        assert_eq!(torch_cuda_in_version_file("cuda = '12.1'\n"), Some((12, 1)));
+        assert_eq!(torch_cuda_in_version_file("cuda: Optional[str] = None\n"), None);
+        assert_eq!(index_cuda("https://download.pytorch.org/whl/cu128"), Some((12, 8)));
+        assert_eq!(index_cuda("https://download.pytorch.org/whl/cu121/"), Some((12, 1)));
+        assert_eq!(index_cuda("https://download.pytorch.org/whl/rocm6.3"), None);
+        assert_eq!(index_cuda("https://download.pytorch.org/whl/cpu"), None);
+    }
+
+    #[test]
+    fn a_stopped_setup_is_remembered_across_a_restart_and_pip_leftovers_go() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let site = root.join("venv").join("Lib").join("site-packages");
+        fs::create_dir_all(site.join("~orch")).unwrap();
+        fs::create_dir_all(site.join("torch")).unwrap();
+        assert!(!setup_was_interrupted(root));
+        mark_setup_unfinished(root);
+        assert!(setup_was_interrupted(root));
+        remove_pip_leftovers(root);
+        assert!(!site.join("~orch").exists(), "pip's parked copy is gone");
+        assert!(site.join("torch").exists(), "the package itself stays");
+        mark_setup_finished(root);
+        assert!(!setup_was_interrupted(root));
+    }
+
+    #[test]
+    fn the_plan_names_only_what_is_missing() {
+        assert!(setup_plan_items(false, false, false, false).is_empty());
+        let all = setup_plan_items(true, true, true, true);
+        assert_eq!(all.len(), 4);
+        let bytes: u64 = all.iter().map(|(_, b)| b).sum();
+        assert!((3_000_000_000..3_200_000_000).contains(&bytes), "the screen says about 3 GB: {bytes}");
     }
 }

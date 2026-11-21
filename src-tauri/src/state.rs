@@ -368,7 +368,7 @@ pub struct AppState {
     /// the disk check speaks again, and a training run that fails the same
     /// way sets it right back. Cleared the moment a provision succeeds.
     pub trainer_env_broken: Arc<AtomicBool>,
-    pub searxng_install: Mutex<InstallState>,
+    pub searxng_install: Arc<Mutex<InstallState>>,
     pub searxng_available: AtomicBool,
     /// Resolved Python binary path. Empty string means "no real Python on
     /// this box" — callers must treat `""` as the missing-Python sentinel
@@ -525,7 +525,7 @@ impl AppState {
             trainer_cancel: Arc::new(AtomicBool::new(false)),
             trainer_process: Arc::new(Mutex::new(None)),
             trainer_env_broken: Arc::new(AtomicBool::new(false)),
-            searxng_install: Mutex::new(InstallState::default()),
+            searxng_install: Arc::new(Mutex::new(InstallState::default())),
             searxng_available: AtomicBool::new(false),
             python_bin: Arc::new(Mutex::new(python_bin)),
             // Claude Code

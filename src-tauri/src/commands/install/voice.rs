@@ -90,6 +90,7 @@ pub fn install_whisper(
 
     let install_state = state.whisper_install.clone();
     let whisper = state.whisper.clone();
+    let cancel = crate::commands::install_jobs::fresh_cancel_flag("whisper");
 
     std::thread::spawn(move || {
         let update = |status: &str, msg: &str| {
@@ -108,9 +109,8 @@ pub fn install_whisper(
         // with the escape hatch so STT installs there too (Arch). No-op
         // on Windows/macOS and in any venv, which pip refuses `--user` for.
         args.extend(pip_escape_args_for(&target_python));
-        // No cancel flag — this single pip install is short relative to the
-        // ComfyUI PyTorch download, so we run it to completion like install_python.
-        match pip_install_streaming_with_retry_cancellable(&args, &target_python, 3, &install_state, None) {
+        // Stopped from the Downloads tray (install_jobs).
+        match pip_install_streaming_with_retry_cancellable(&args, &target_python, 3, &install_state, Some(&cancel)) {
             Ok(()) => {
                 update("installing", "faster-whisper installed. Starting the speech-to-text server…");
                 // Start the persistent server with the SAME Python we installed
@@ -134,6 +134,7 @@ pub fn install_whisper(
                     update("complete", "faster-whisper installed. The STT server will finish loading shortly (or on next launch).");
                 }
             }
+            Err(diagnosis) if diagnosis == "cancelled" => update("cancelled", "Stopped."),
             Err(diagnosis) => {
                 let err = format!("faster-whisper installation failed.\n\n{}", diagnosis);
                 println!("[Whisper Install] {}", err);
@@ -189,6 +190,7 @@ pub fn install_tts(
     let default_python = resolve_lu_python(state.inner());
     let voices_dir = crate::commands::tts::piper_voices_dir(&app)?;
     let install_state = state.tts_install.clone();
+    let cancel = crate::commands::install_jobs::fresh_cancel_flag("tts");
 
     std::thread::spawn(move || {
         let update = |status: &str, msg: &str| {
@@ -217,8 +219,12 @@ pub fn install_tts(
                 update("installing", "Piper is already installed, skipping pip.");
                 py
             }
-            None => match build_piper_env(&default_python, &dir, &install_state, &update, &imports) {
+            None => match build_piper_env(&default_python, &dir, &install_state, &cancel, &update, &imports) {
                 Ok(py) => py,
+                Err(msg) if msg == "cancelled" => {
+                    update("cancelled", "Stopped.");
+                    return;
+                }
                 Err(msg) => {
                     fail(&msg);
                     return;
@@ -242,12 +248,31 @@ pub fn install_tts(
             "--download-dir",
             &voices_dir.to_string_lossy(),
         ])
-        .stdout(Stdio::piped())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped());
-        match cmd.output() {
-            Ok(o) if o.status.success() => update("complete", "Neural TTS is ready."),
-            Ok(o) => fail(&format!("Voice download failed:\n{}", String::from_utf8_lossy(&o.stderr))),
-            Err(e) => fail(&format!("Voice download could not start: {}", os_error::english(&e))),
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                fail(&format!("Voice download could not start: {}", os_error::english(&e)));
+                return;
+            }
+        };
+        // Read beside the wait, or a chatty child fills the pipe and hangs.
+        let stderr = child.stderr.take().map(|mut pipe| {
+            std::thread::spawn(move || {
+                let mut text = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut pipe, &mut text);
+                String::from_utf8_lossy(&text).to_string()
+            })
+        });
+        let ended = super::children::wait_or_cancel(&mut child, Some(&cancel), "voice download");
+        let said = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
+        match ended {
+            Ok(status) if status.success() => update("complete", "Neural TTS is ready."),
+            Ok(_) => fail(&format!("Voice download failed:\n{said}")),
+            Err(e) if e == "cancelled" => update("cancelled", "Stopped."),
+            Err(e) => fail(&format!("Voice download could not start: {e}")),
         }
     });
 
@@ -261,6 +286,7 @@ fn build_piper_env(
     default_python: &str,
     dir: &std::path::Path,
     install_state: &std::sync::Arc<std::sync::Mutex<crate::state::InstallState>>,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     update: &dyn Fn(&str, &str),
     imports: &dyn Fn(&str) -> bool,
 ) -> Result<String, String> {
@@ -285,8 +311,7 @@ fn build_piper_env(
             if found.is_empty() { "none that starts".to_string() } else { found.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(" and ") },
         ));
     }
-    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let progress = crate::private_python::StatusProgress { status: install_state, cancel: &cancel };
+    let progress = crate::private_python::StatusProgress { status: install_state, cancel };
     let why = crate::private_python::Why {
         log: "no Python 3.11 to 3.14 on this computer for Piper",
         sentence: "This computer has no Python 3.11 to 3.14 for neural TTS",
@@ -314,7 +339,10 @@ fn build_piper_env(
 
     update("installing", &format!("Installing {} (this can take a few minutes)…", piper_env::PIPER_TTS));
     let args = piper_env::pip_args(std::env::consts::OS);
-    if let Err(diagnosis) = venv_pip_install_streaming_with_retry_cancellable(&args, &venv_python, 3, install_state, None) {
+    if let Err(diagnosis) = venv_pip_install_streaming_with_retry_cancellable(&args, &venv_python, 3, install_state, Some(cancel)) {
+        if diagnosis == "cancelled" {
+            return Err(diagnosis);
+        }
         let log = install_state.lock().map(|s| s.logs.clone()).unwrap_or_default();
         return Err(piper_env::failure_message(&diagnosis, &log, &base, &version));
     }
@@ -365,7 +393,8 @@ mod tests {
             state.lock().unwrap().logs.push(msg.to_string());
         };
         let imports = |py: &str| python_command(py).args(["-c", "import piper.download_voices"]).status().map(|s| s.success()).unwrap_or(false);
-        let venv_py = build_piper_env(&py315, &dir, &state, &update, &imports).unwrap_or_else(|e| panic!("{e}"));
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let venv_py = build_piper_env(&py315, &dir, &state, &cancel, &update, &imports).unwrap_or_else(|e| panic!("{e}"));
         let (v, _) = piper_env::probe(&venv_py).unwrap();
         println!("Piper's environment: Python {v} at {venv_py}");
         assert!(piper_env::major_minor(&v).is_some_and(piper_env::piper_accepts), "{v}");

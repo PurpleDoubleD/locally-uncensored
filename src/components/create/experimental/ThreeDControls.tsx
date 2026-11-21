@@ -54,17 +54,19 @@ export function ThreeDControls({ maxViews, hasDetail, hasCutout, studioId, pictu
   }
   return (
     <div className="flex flex-col gap-3" data-testid="three-d-controls">
-      <Segmented
-        ariaLabel="How to make the model"
-        layoutId="three-d-way"
-        value={way}
-        onChange={setWay}
-        options={WAYS.map((w) => ({ value: w, label: T.ways[w] }))}
-      />
-      {way === 'text' && pictureFirst && <p className="t-micro text-gray-400" data-testid="three-d-picture-first">{T.pictureFirst}</p>}
+      <div className="flex justify-center" data-testid="three-d-way">
+        <Segmented
+          ariaLabel="How to make the model"
+          layoutId="three-d-way"
+          value={way}
+          onChange={setWay}
+          options={WAYS.map((w) => ({ value: w, label: T.ways[w] }))}
+        />
+      </div>
+      {way === 'text' && pictureFirst && <p className="t-micro text-gray-400 text-center" data-testid="three-d-picture-first">{T.pictureFirst}</p>}
       {way === 'image' && maxViews > 1 && <SideStrip maxViews={maxViews} />}
       {way === 'video' && <VideoFrames maxViews={maxViews} />}
-      <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center justify-center gap-4">
         {hasCutout && way !== 'text' && (
           <label className="flex items-center gap-2 t-control text-gray-300 cursor-pointer">
             <input type="checkbox" checked={cutout} onChange={(e) => setCutout(e.target.checked)} data-testid="three-d-cutout" />

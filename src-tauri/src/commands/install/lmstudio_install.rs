@@ -233,6 +233,10 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
                     if let Err(e) =
                         download_file_blocking(LMSTUDIO_INSTALLER_URL, &installer_path, &lms_state)
                     {
+                        if e == "cancelled" {
+                            update("cancelled", "Stopped.");
+                            return;
+                        }
                         let err = format!(
                             "Download failed: {}. If the network is fine, the installer URL may have rotated — fall back to https://lmstudio.ai/download in your browser.",
                             e

@@ -45,7 +45,7 @@ pub async fn cancel_comfyui_install(app: tauri::AppHandle) -> Result<serde_json:
 /// therefore a guess, and P3 caught it guessing wrong.
 pub(crate) const CANCEL_WAIT_LINE: &str = "Cancellation requested. Stopping at the next safe point...";
 
-fn cancel_comfyui_install_blocking(state: &AppState) -> Result<serde_json::Value, String> {
+pub(crate) fn cancel_comfyui_install_blocking(state: &AppState) -> Result<serde_json::Value, String> {
     // OI-7: the flag is still what cancel uses, deliberately. It is scoped to
     // the ComfyUI install — the poll loops that watch it now take the child's
     // whole TREE down (see `pip_install_streaming_with_retry_cancellable` and

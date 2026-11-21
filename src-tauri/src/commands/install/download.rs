@@ -83,6 +83,11 @@ pub(super) fn download_file_blocking(
         if n == 0 {
             break;
         }
+        if install_state.lock().map(|s| s.status == "cancelling").unwrap_or(false) {
+            drop(file);
+            let _ = fs::remove_file(dest);
+            return Err("cancelled".to_string());
+        }
         std::io::Write::write_all(&mut file, &buf[..n])
             .map_err(|e| format!("Write: {}", os_error::english(&e)))?;
         downloaded += n as u64;

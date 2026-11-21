@@ -283,14 +283,29 @@ pub fn install_searxng(state: State<'_, AppState>) -> Result<serde_json::Value, 
     // Run docker pull + run in background.
     // On Windows we add CREATE_NO_WINDOW so the docker CLI doesn't flash a
     // console window at the user when they install SearXNG from LU.
+    let slot = state.searxng_install.clone();
+    let cancel = crate::commands::install_jobs::fresh_cancel_flag("searxng");
     std::thread::spawn(move || {
+        let finish = |status: &str, line: &str| {
+            if let Ok(mut s) = slot.lock() {
+                s.status = status.to_string();
+                s.logs.push(line.to_string());
+            }
+        };
         let mut pull_cmd = crate::process_util::foreign_system_command("docker");
-        pull_cmd.args(["pull", "searxng/searxng"]);
+        pull_cmd.args(["pull", "searxng/searxng"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
         crate::process_util::suppress_window(&mut pull_cmd);
-        let pull = pull_cmd.output();
+        let pull = pull_cmd
+            .spawn()
+            .map_err(|e| crate::os_error::english(&e))
+            .and_then(|mut child| crate::commands::install::wait_or_cancel(&mut child, Some(&cancel), "docker pull"));
 
         match pull {
-            Ok(output) if output.status.success() => {
+            Err(e) if e == "cancelled" => finish("cancelled", "Stopped."),
+            Ok(output) if output.success() => {
                 let mut run_cmd = crate::process_util::foreign_system_command("docker");
                 run_cmd.args([
                     "run", "-d", "--name", "searxng",
@@ -301,9 +316,11 @@ pub fn install_searxng(state: State<'_, AppState>) -> Result<serde_json::Value, 
                 crate::process_util::suppress_window(&mut run_cmd);
                 let _ = run_cmd.output();
                 println!("[SearXNG] Installed and running on port 8888");
+                finish("complete", "SearXNG is running on port 8888.");
             }
             _ => {
                 println!("[SearXNG] Docker pull failed. Is Docker installed?");
+                finish("error", "The Docker pull failed. Check that Docker is installed and running.");
             }
         }
     });

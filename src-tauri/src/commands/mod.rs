@@ -50,6 +50,10 @@ pub mod health;
 // phone (lib.rs).
 #[cfg_attr(mobile, allow(unused_imports, unused_variables))]
 pub mod install;
+// Its two commands are desktop only; the installers that stay compiled on a
+// phone still reach its cancel flags.
+#[cfg_attr(mobile, allow(dead_code))]
+pub mod install_jobs;
 pub mod install_method;
 pub mod install_method_cmd;
 pub mod self_migrate;

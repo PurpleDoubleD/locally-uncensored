@@ -839,14 +839,19 @@ pub fn abliterate_status() -> Value {
 #[tauri::command]
 pub async fn abliterate_cancel() -> Result<Value, String> {
     tokio::task::spawn_blocking(|| {
-        CANCEL.store(true, Ordering::SeqCst);
-        if let Some(pid) = with_run(|r| r.pid) {
-            crate::commands::shell::kill_tree(pid);
-        }
+        cancel_now();
         status_value()
     })
     .await
     .map_err(|e| format!("cancel task: {e}"))
+}
+
+/// Stop the run and its process tree. Blocks for the kill.
+pub(crate) fn cancel_now() {
+    CANCEL.store(true, Ordering::SeqCst);
+    if let Some(pid) = with_run(|r| r.pid) {
+        crate::commands::shell::kill_tree(pid);
+    }
 }
 
 /// Back to idle after the result or the error has been read.
