@@ -89,9 +89,11 @@ test('mac local: MLX lanes run locally, cloud-only lanes stay visible as teasers
   // Music is here because this Mac has no music engine: since 14.10.2026 a
   // Mac with ACE-Step 1.5 installed has a local Music tab (mac-music.spec.ts),
   // one without it keeps the teaser.
-  for (const label of ['Enhance Image', 'Erase Object', 'Music', 'Extend Video']) {
+  for (const label of ['Enhance Image', 'Music', 'Extend Video']) {
     await expect(page.getByRole('radio', { name: `${label}, runs on LU Cloud` })).toBeVisible()
   }
+  // Since 3.1.3 Erase has left local mode: no tab and no locked teaser.
+  await expect(page.getByRole('radio', { name: /^Erase Object/ })).toHaveCount(0)
   // The Character area is a local tab: "Use character" (Image) runs the
   // LoRA from the Mac's LoRA folder through MLX. Talk and Motion are its
   // actions and show their cloud lock there.

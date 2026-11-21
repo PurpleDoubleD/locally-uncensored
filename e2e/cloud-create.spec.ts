@@ -121,12 +121,9 @@ test('local mode: local lanes usable, cloud-only ops shown as locked teasers', a
   await expect(page.getByRole('radio', { name: 'Enhance Image', exact: true })).toBeVisible()
   await expect(page.getByRole('radio', { name: 'Enhance Image, runs on LU Cloud' })).toHaveCount(0)
 
-  // cloudOnly WITHOUT a local lane (eraser) renders locked: aria-label gains
-  // ", runs on LU Cloud" and a click opens the teaser instead of switching
-  // the lane.
-  await expect(page.getByRole('radio', { name: 'Erase Object, runs on LU Cloud' })).toBeVisible()
-
-  await page.getByRole('radio', { name: 'Erase Object, runs on LU Cloud' }).click()
+  // Since 3.1.3 Erase has left local mode: no tab and no locked teaser. A mask
+  // in Edit removes objects there.
+  await expect(page.getByRole('radio', { name: /^Erase Object/ })).toHaveCount(0)
   await expect(page.getByRole('radio', { name: 'Image', exact: true })).toBeChecked()
 })
 

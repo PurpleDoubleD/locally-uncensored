@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME, type TauriMockOptions } from './support/tauri-mock'
 import { routeCloud, seedOnboardingDone, cloudSwitch } from './support/cloud-mock'
 import { mlxCalls } from './support/recorded'
-import { openCharacterAction, openCharacterTraining } from './support/character-hub'
+import { openCharacterTraining, openTrainMore } from './support/character-hub'
 
 /**
  * 3.0.9 P8 (Discord, 28.10.2026: "can the built-in trainer do styles,
@@ -54,6 +54,7 @@ async function openTrainTab(page: Page) {
   await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
   await openCharacterTraining(page)
+  await openTrainMore(page)
 }
 
 const calls = async (page: Page, cmd: string) => (await mlxCalls(page)).filter((c) => c.cmd === cmd)
@@ -70,7 +71,7 @@ test('mac: a style is trained with content captions and lands switched on in the
   await expect(page.getByTestId('style-mode-note')).toContainText('Teaches a look, a concept or a pose')
   await expect(page.getByText('Drop 4 to 100 pictures in the style here')).toBeVisible()
   // FEHLER-P8 #1: the line over Create speaks of the style too.
-  await expect(page.getByText('Add 4 to 100 pictures that share the style above, give it a name, then hit Create to train.')).toBeVisible()
+  await expect(controls).toContainText('0 of 100 pictures')
   await expect(page.getByText(/photos of one person or character/)).toHaveCount(0)
   await expect(page.getByTestId('mac-train-hint')).toContainText('Standard, 1600 steps')
   await expect(page.getByTestId('mac-train-hint')).toContainText('The style lands in your LoRA folder')
@@ -80,16 +81,16 @@ test('mac: a style is trained with content captions and lands switched on in the
 
   const files = pictures(4)
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles(files)
-  await expect(controls).toContainText('4/100 pictures')
+  await expect(controls).toContainText('4 of 100 pictures')
   await expect(page.getByTestId('train-caption-help')).toContainText('what is left unnamed is what the LoRA learns')
+  await page.locator('summary', { hasText: 'Describe the photos' }).click()
   const fields = page.getByPlaceholder('e.g. a fox in a forest')
   await expect(fields).toHaveCount(4)
   await fields.nth(0).fill('a fox in a forest')
   await fields.nth(1).fill('an old lighthouse on a rocky cliff')
-  await expect(page.getByText("Training runs on this Mac and lands the style in the Mac's LoRA folder.")).toBeVisible()
   await shot(page, 'p8-2-style-mode-ready')
 
-  await page.getByRole('button', { name: /^Create$/ }).last().click()
+  await page.getByRole('button', { name: 'Start training' }).last().click()
   await expect.poll(async () => (await calls(page, 'mlx_train_start')).length, { timeout: 30_000 }).toBe(1)
   const [clear] = await calls(page, 'mlx_train_clear')
   expect(clear.raw.set).toBe('style-p8lino')
@@ -118,8 +119,9 @@ test('mac: a style is trained with content captions and lands switched on in the
 
   // The character shelf does not list a style.
   await page.keyboard.press('Escape')
-  await openCharacterAction(page, 'Character Studio')
-  await expect(page.getByTestId('mac-no-characters')).toBeVisible({ timeout: 15_000 })
+  // The run ended on the Image tab. The Character area lists no style.
+  await page.getByRole('radiogroup', { name: 'Create mode' }).getByRole('radio', { name: 'Character', exact: true }).click()
+  await expect(page.locator('[data-character-hub]')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTitle('Trigger word: p8lino')).toHaveCount(0)
 })
 
@@ -130,9 +132,10 @@ test('mac: a style without trigger word is captioned by its content alone', asyn
   await page.getByTestId('style-trigger').uncheck()
   await expect(page.getByTestId('style-trigger-hint')).toContainText('No trigger word')
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles(pictures(4))
+  await page.locator('summary', { hasText: 'Describe the photos' }).click()
   await page.getByPlaceholder('e.g. a fox in a forest').nth(0).fill('a fox in a forest')
   await shot(page, 'p8-4-style-without-trigger')
-  await page.getByRole('button', { name: /^Create$/ }).last().click()
+  await page.getByRole('button', { name: 'Start training' }).last().click()
   await expect.poll(async () => (await calls(page, 'mlx_train_start')).length, { timeout: 30_000 }).toBe(1)
   const staged = (await calls(page, 'mlx_train_stage')).map((c) => c.raw.caption)
   expect(staged).toEqual(['a fox in a forest', '', '', ''])

@@ -47,7 +47,7 @@ async function editOnce(page: Page) {
   return mlxCalls(page)
 }
 
-test('C75 Mac: "Custom size" in 9:16 cuts a 3:2 picture to 9:16 before the engine reads it', async ({ page }) => {
+test('C75 Mac: "Custom size" in 9:16 hands the engine the whole 3:2 picture and a 9:16 canvas', async ({ page }) => {
   await boot(page)
   await page.getByRole('button', { name: 'Advanced settings' }).click()
   const drawer = page.locator('aside').filter({ hasText: 'Advanced settings' })
@@ -55,7 +55,7 @@ test('C75 Mac: "Custom size" in 9:16 cuts a 3:2 picture to 9:16 before the engin
   await expect(shape).toBeVisible({ timeout: 15_000 })
   await shape.getByRole('radio', { name: 'Custom size' }).click()
   await drawer.getByRole('button', { name: '9:16', exact: true }).click()
-  await expect(shape).toContainText('cropped from its centre')
+  await expect(shape).toContainText('nothing of it is cut off')
   await shape.scrollIntoViewIfNeeded()
   if (process.env.LU_SHOTS) {
     await page.waitForTimeout(600)
@@ -64,16 +64,13 @@ test('C75 Mac: "Custom size" in 9:16 cuts a 3:2 picture to 9:16 before the engin
   await page.keyboard.press('Escape')
 
   const calls = await editOnce(page)
-  // The upload staged the picture as it is; the edit stages the cut one.
+  // Since a8ccb0c62 nothing is cut: only the upload is staged, as it is.
   const staged = calls.filter((c) => c.cmd === 'video_stage_start_image')
-  expect(staged).toHaveLength(2)
+  expect(staged).toHaveLength(1)
   expect(await stagedSize(page, String(staged[0].raw.data))).toEqual([768, 512])
-  const [w, h] = await stagedSize(page, String(staged[1].raw.data))
-  // The full height of the picture, the width cut to 9:16, nothing scaled up.
-  expect(h).toBe(512)
-  expect(Math.abs(w / h - 9 / 16)).toBeLessThan(0.01)
   const gen = calls.find((c) => c.cmd === 'mlx_generate')!
   expect(gen.raw.images).toEqual(['/tmp/lu-e2e/videos/start-images/e2e-start.png'])
+  expect(Math.abs(Number(gen.raw.width) / Number(gen.raw.height) - 9 / 16)).toBeLessThan(0.03)
 })
 
 test('COUNTER-CHECK C75 Mac: by default the picture goes in as it is', async ({ page }) => {

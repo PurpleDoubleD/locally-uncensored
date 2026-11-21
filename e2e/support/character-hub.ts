@@ -62,6 +62,14 @@ export async function openCharacterTraining(page: Page, timeout = 15_000): Promi
   await expect(page.locator('[data-hub-training]')).toBeVisible({ timeout })
 }
 
+/** Opens "More options" of the training page, where the trainer's own choices
+ *  and Reinstall stand since 3.1.3. */
+export async function openTrainMore(page: Page, timeout = 15_000): Promise<void> {
+  const more = page.locator('[data-hub-training] [data-hub-train-more]').filter({ has: page.locator('summary', { hasText: 'More options' }) }).last()
+  await expect(more).toBeVisible({ timeout })
+  if ((await more.getAttribute('open')) === null) await more.locator('summary').click({ timeout })
+}
+
 /** The stage without a character, where the actions and their locks show. */
 export async function openCharacterWhat(page: Page, timeout = 15_000): Promise<void> {
   await openCharacterHub(page, timeout)
