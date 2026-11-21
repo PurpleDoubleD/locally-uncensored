@@ -27,6 +27,7 @@ import { unbackedLinksNotice } from '../../lib/unbacked-links'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
+import { useReplyWriteStore } from '../../stores/replyWriteStore'
 import { chatToolsReach } from '../../lib/chat-tools-reach'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool-call-repair'
@@ -186,10 +187,13 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
   // single editable text, so the pencil hides there instead of editing a
   // field nobody sees. Also used below to pick the content fallback.
   const hasRealAnswerBlocks = useMemo(() => [...cleanBlocks.values()].some(Boolean), [cleanBlocks])
-  // No editing while the turn still streams: the flush would overwrite the
-  // edit a frame later. Done is marked by usage arriving with the done chunk.
+  // No editing while a run can still write here: its flush would overwrite the
+  // edit. Not read from `usage`, which a stopped or failed answer never gets
+  // (GH #264). isStreaming alone ends too early, Stop clears it before the run
+  // has written its last text.
+  const replyStillWriting = useReplyWriteStore((s) => !!s.open[message.id])
   const canEditAssistant = !isUser && !hasRealAnswerBlocks
-    && !!(message.content || '').trim() && (!isLast || !!message.usage)
+    && !!(message.content || '').trim() && !isStreaming && !replyStillWriting
 
   useEffect(() => {
     if (isEditing && editRef.current) {
