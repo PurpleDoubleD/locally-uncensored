@@ -910,11 +910,24 @@ pub(crate) fn this_machine_amd_left_on_processor() -> bool {
     if std::env::consts::OS != "windows" {
         return false;
     }
-    let (has_nvidia, _, amd_names) = gpu_vendor_facts();
-    let amd_refs: Vec<&str> = amd_names.iter().map(String::as_str).collect();
-    let intel = intel_gpu_names();
+    amd_status_facts().2
+}
+
+/// AMD names and `amd_left_on_processor` from ONE hardware probe. The probe
+/// starts vendor tools, and `get_comfy_gpu_status` is a synchronous command, so
+/// asking it once per fact would hold the app three times as long.
+pub(crate) fn amd_status_facts() -> (bool, Vec<String>, bool) {
+    let gpus = crate::commands::gpu::detect_gpus().unwrap_or_default();
+    let names_of = |vendor: &str| -> Vec<String> {
+        gpus.iter().filter(|g| g.vendor == vendor).map(|g| g.name.clone()).collect()
+    };
+    let amd = names_of("amd");
+    let intel = names_of("intel");
+    let amd_refs: Vec<&str> = amd.iter().map(String::as_str).collect();
     let intel_refs: Vec<&str> = intel.iter().map(String::as_str).collect();
-    amd_left_on_processor(has_nvidia, &amd_refs, &intel_refs, std::env::consts::OS)
+    let has_nvidia = gpus.iter().any(|g| g.vendor == "nvidia");
+    let left = amd_left_on_processor(has_nvidia, &amd_refs, &intel_refs, std::env::consts::OS);
+    (!amd.is_empty(), amd, left)
 }
 
 #[cfg(test)]

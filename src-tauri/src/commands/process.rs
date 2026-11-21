@@ -3137,10 +3137,9 @@ pub fn get_comfy_gpu_status(state: State<'_, AppState>) -> Result<serde_json::Va
     // user can act on: an AMD card on Linux wants a rebuilt environment, the
     // same card on Windows wants to be told no rebuild can help. Same probe the
     // hardware picker and the installers use.
-    let (_, has_amd, amd_names) = crate::commands::torch_wheels::gpu_vendor_facts();
+    let (has_amd, amd_names, amd_no_gpu_build) = crate::commands::torch_wheels::amd_status_facts();
     let amd_refs: Vec<&str> = amd_names.iter().map(String::as_str).collect();
     let amd_rocm = crate::commands::torch_wheels::amd_rocm_served(&amd_refs, std::env::consts::OS);
-    let amd_no_gpu_build = crate::commands::torch_wheels::this_machine_amd_left_on_processor();
     Ok(serde_json::json!({ "mode": mode, "startedCpu": started_cpu, "hasAmd": has_amd, "amdRocmServed": amd_rocm, "amdNoGpuBuild": amd_no_gpu_build }))
 }
 
