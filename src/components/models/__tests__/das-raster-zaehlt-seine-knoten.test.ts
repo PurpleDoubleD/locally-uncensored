@@ -142,7 +142,9 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
     // 54 -> 57 am selben Tag, nach E1 (llama.cpp b11960): LFM3 1.7B, VL 2B
     // und Omni 2B auch als GGUF-Gruppen fuer LU Engine und LM Studio.
     // 57 -> 58: LFM3 Audio 2B als GGUF, seit die LU Engine damit hoert und spricht.
-    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(58)
+    // 58 -> 59: Inkling 2 Mini ueber Ollama (3.1.3).
+    // 59 -> 60: dieselbe Familie als GGUF, 23 Stufen auf einer Kachel.
+    expect(messeReiter(getMainstreamTextModels()).kacheln).toBe(60)
     //
     // 56 -> 57 am 05.09.2026, vierte Bewegung. Der Inhaber: „orcarouter ist ein
     // muss." Die sechs Qwen-3.8-27B-Uncensored-Quants zeigen jetzt auf
@@ -178,7 +180,8 @@ describe('D-S26 · was das Raster wirklich kostet', () => {
       // vier LFM3-Kacheln 2009 Elemente. Die Browsermessung oben hat 303
       // Kacheln (rund 7500 Knoten) bei 1,1 ms gezeigt; die Grenze sagt nur
       // "Groessenordnung des Audits", und die steht.
-      expect(knoten).toBeLessThan(2200)
+      // 2200 -> 2300 am 21.11.2026: die GGUF-Kachel von Inkling 2 Mini, gemessen 2225.
+      expect(knoten).toBeLessThan(2300)
     }
   })
 

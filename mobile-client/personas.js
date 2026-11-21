@@ -10,7 +10,7 @@
   // Keep in sync with THINKING_COMPATIBLE in src/lib/model-compatibility.ts.
   // Mobile matches by PREFIX on the plain lowercased tag (no dash-collapse),
   // so entries here are the literal Ollama tag prefixes.
-  var THINKING_COMPATIBLE = ['qwq','deepseek-r1','qwen3.6','qwen3','qwen3.5','qwen3-coder','gemma3','gemma4','gpt-oss','magistral','deepseek-v3.1','deepseek-v3.2','exaone-deep','phi4-reasoning','phi4-mini-reasoning','glm4.5','glm4.6','glm4.7','kimi-k2-thinking','minimax-m2'];
+  var THINKING_COMPATIBLE = ['inkling-2','thinkingmachines_inkling-2','qwq','deepseek-r1','qwen3.6','qwen3','qwen3.5','qwen3-coder','gemma3','gemma4','gpt-oss','magistral','deepseek-v3.1','deepseek-v3.2','exaone-deep','phi4-reasoning','phi4-mini-reasoning','glm4.5','glm4.6','glm4.7','kimi-k2-thinking','minimax-m2'];
 
   // ── Plain-text planner models — Gemma 3/4 ──
   // Bug fix parity with desktop entry #80: Gemma 3/4 with `think:false`

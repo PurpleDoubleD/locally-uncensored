@@ -13,6 +13,7 @@
  * M1.8 cancel, M1.9 use in chat, M1.10 benchmark, M1.11 clean up partial
  * downloads, M1.12 storage card.
  */
+import { REMOTE_ONLY_MODEL, isRemoteOnlyModel } from '../../lib/phone-engine-limits'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownToLine, Cpu, Gauge, Search, Trash2 } from 'lucide-react'
 import { searchHuggingFaceModels } from '../../../api/discover'
@@ -101,6 +102,10 @@ function HitCard({ hit, actions }: { hit: DiscoverModel; actions: CardActions })
       onDownload={() => {
         if (!variant) {
           toast(S.detail.noGguf, { tone: 'error', testid: 'no-gguf' })
+          return
+        }
+        if (isRemoteOnlyModel(hit.name, variant.files[0]?.filename)) {
+          toast(REMOTE_ONLY_MODEL, { tone: 'error', testid: 'remote-only' })
           return
         }
         if (variant.sharded) {

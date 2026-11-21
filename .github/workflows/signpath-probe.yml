@@ -63,13 +63,13 @@ permissions:
 
 env:
   # Same pin as release.yml and sidecar-windows.yml; bump the three together.
-  VULKAN_SDK_VERSION: '1.4.313.2'
+  VULKAN_SDK_VERSION: '1.4.357.0'
   # sha256 of the Windows installer of exactly that version. The installer is
   # run on the build machine, so it is checked before it starts. Read from
-  # the publisher's own list on 2026-10-10:
-  #   https://sdk.lunarg.com/sdk/sha/1.4.313.2/windows/vulkansdk-windows-X64-1.4.313.2.exe.txt
+  # the publisher's own list on 2026-11-21:
+  #   https://sdk.lunarg.com/sdk/sha/1.4.357.0/windows/vulkansdk-windows-X64-1.4.357.0.exe.txt
   # Bump it with the version, in the same three files.
-  VULKAN_SDK_SHA256: '34a921d951858274ca8e470e9d0a3b7624db41216b3908ccea9f73c8a1b7500e'
+  VULKAN_SDK_SHA256: '81f474711e9042f4cd22b31b2f7a8870db2e428b21586fb43dd80150be97310d'
   LABEL: ${{ inputs.label || format('probe-{0}', github.run_id) }}
 
 jobs:

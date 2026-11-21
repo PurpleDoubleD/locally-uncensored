@@ -165,6 +165,7 @@ pub fn is_chat_arch(arch: &str) -> bool {
 }
 
 pub fn facts(path: &str) -> Result<ModelFacts, String> {
+    crate::commands::gguf::refuse_weight_tools(path)?;
     let head = read_model_head(path).ok_or("LU cannot read this file as a GGUF model.")?;
     let arch = head.arch().ok_or("The model file names no architecture.")?.to_string();
     if !is_chat_arch(&arch) {

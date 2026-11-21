@@ -631,6 +631,7 @@ fn existing_ancestor(p: &Path) -> PathBuf {
 #[tauri::command]
 pub async fn abliterate_plan(app: tauri::AppHandle, path: String, repo: Option<String>) -> Result<Value, String> {
     let _ = &app;
+    crate::commands::gguf::refuse_weight_tools(&path)?;
     tokio::task::spawn_blocking(move || plan_blocking(&path, repo))
         .await
         .map_err(|e| format!("plan task: {e}"))?
@@ -817,6 +818,7 @@ fn start_blocking(app: &tauri::AppHandle, args: StartArgs) -> Result<Value, Stri
 
 #[tauri::command]
 pub async fn abliterate_start(app: tauri::AppHandle, args: StartArgs) -> Result<Value, String> {
+    crate::commands::gguf::refuse_weight_tools(&args.path)?;
     tokio::task::spawn_blocking(move || start_blocking(&app, args)).await.map_err(|e| format!("start task: {e}"))?
 }
 

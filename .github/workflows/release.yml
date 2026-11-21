@@ -54,16 +54,19 @@ permissions:
 # would hit the old cache and stop in assert_patched_tree (E1).
 env:
   # Vulkan SDK pin for the GGML_VULKAN sidecar builds: the Windows lane uses
-  # the full installer version, the Linux lane derives the 3-part family for
-  # LunarG's jammy apt repo. Bump together with the llama.cpp tag; LunarG
+  # the full installer version, the Linux lane takes LunarG's tarball of the
+  # same version. Bump together with the llama.cpp tag; LunarG
   # keeps old versions up.
-  VULKAN_SDK_VERSION: '1.4.313.2'
+  VULKAN_SDK_VERSION: '1.4.357.0'
   # sha256 of the Windows installer of exactly that version. The installer is
   # run on the build machine, so it is checked before it starts. Read from
-  # the publisher's own list on 2026-10-10:
-  #   https://sdk.lunarg.com/sdk/sha/1.4.313.2/windows/vulkansdk-windows-X64-1.4.313.2.exe.txt
+  # the publisher's own list on 2026-11-21:
+  #   https://sdk.lunarg.com/sdk/sha/1.4.357.0/windows/vulkansdk-windows-X64-1.4.357.0.exe.txt
   # Bump it with the version, in the same three files.
-  VULKAN_SDK_SHA256: '34a921d951858274ca8e470e9d0a3b7624db41216b3908ccea9f73c8a1b7500e'
+  VULKAN_SDK_SHA256: '81f474711e9042f4cd22b31b2f7a8870db2e428b21586fb43dd80150be97310d'
+  # The Linux tarball of the same version, from
+  #   https://sdk.lunarg.com/sdk/sha/1.4.357.0/linux/vulkansdk-linux-x86_64-1.4.357.0.tar.xz.txt
+  VULKAN_SDK_LINUX_SHA256: '0f09bf6a0625e346bf004be70b92907e934a4c76606b323441b2baf3a5a0e66d'
 
   # BLOCKER A1 (review-integ.md, Teil (a)): the boot-smoke steps below used to
   # pull this file from `resolve/main`, a moving pointer, with no hash check,
@@ -358,16 +361,23 @@ jobs:
       - name: Install Vulkan toolchain (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          # Jammy ships no glslc/shaderc binary packages, and ggml's Vulkan
-          # backend hard-requires glslc — install the SDK from LunarG's jammy
-          # repo, pinned to the same family as the Windows lane.
-          family="${VULKAN_SDK_VERSION%.*}"
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
-          sudo wget -qO "/etc/apt/sources.list.d/lunarg-vulkan-${family}-jammy.list" \
-            "https://packages.lunarg.com/vulkan/${family}/lunarg-vulkan-${family}-jammy.list"
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+          # LunarG's jammy apt repo stops at 1.4.313, and llama.cpp needs the
+          # SPIRV-Headers CMake package, so the Linux lane takes the publisher's
+          # tarball of the same version as Windows, checked before unpacking.
+          # Its glslc needs glibc 2.34, jammy has 2.35. The loader for the boot
+          # checks is the distribution's.
+          file="vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.xz"
+          curl -fL --retry 3 --max-time 900 -o "$RUNNER_TEMP/$file" \
+            "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/$file"
+          echo "${VULKAN_SDK_LINUX_SHA256}  $RUNNER_TEMP/$file" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP"
+          sdk="$RUNNER_TEMP/${VULKAN_SDK_VERSION}/x86_64"
+          test -f "$sdk/share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake"
+          "$sdk/bin/glslc" --version
+          sudo apt-get install -y libvulkan1
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$sdk:$sdk/lib/VulkanLoader" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
 
       - name: Build llama-server sidecar
         shell: bash
