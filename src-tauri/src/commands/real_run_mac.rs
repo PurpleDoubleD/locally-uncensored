@@ -153,7 +153,7 @@ fn shorten(line: &str) -> String {
 // ── The limits of the night ───────────────────────────────────────────
 
 fn shell(program: &str, args: &[&str]) -> String {
-    std::process::Command::new(program)
+    crate::process_util::hidden_command(program)
         .args(args)
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())

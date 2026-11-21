@@ -150,7 +150,7 @@ fn with_ffmpeg(ffmpeg: &Path, video: &Path, side: u32) -> Option<Vec<u8>> {
 #[cfg(target_os = "macos")]
 fn with_quick_look(video: &Path, side: u32) -> Option<Vec<u8>> {
     let dir = tempfile::tempdir().ok()?;
-    let mut cmd = Command::new("/usr/bin/qlmanage");
+    let mut cmd = crate::process_util::hidden_command("/usr/bin/qlmanage");
     cmd.arg("-t").arg("-s").arg(side.to_string()).arg("-o").arg(dir.path()).arg(video);
     // It writes the picture into `dir`; what it prints does not matter.
     let _ = run_with_timeout(cmd);

@@ -21,7 +21,7 @@
 use crate::commands::engine::{model_shape, plan_request, server_args, EngineTuning};
 use crate::commands::vram_plan::{decide, parse_engine_report, Budget, Calibration, Card, Host, ImagePart, MIB};
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 fn mib(b: u64) -> u64 {
@@ -89,7 +89,7 @@ fn live_plan_against_the_real_engine() {
             let ram_before = available_ram();
             let free_before = reading.as_ref().filter(|r| r.free).map(|r| r.bytes);
 
-            let mut cmd = Command::new(&engine);
+            let mut cmd = crate::process_util::hidden_command(&engine);
             cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
             if let Some(dir) = &engine_dir {
                 cmd.current_dir(dir);

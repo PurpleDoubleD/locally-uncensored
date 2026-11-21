@@ -339,7 +339,7 @@ mod system {
     }
 
     fn powershell(script: &str, timeout: Duration) -> Option<(bool, Vec<u8>)> {
-        let mut cmd = Command::new("powershell");
+        let mut cmd = crate::process_util::hidden_command("powershell");
         cmd.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded_powershell(script)]);
         run(cmd, timeout)
     }
@@ -350,7 +350,7 @@ mod system {
     }
 
     pub(super) fn rules() -> Option<Vec<FwRule>> {
-        let mut cmd = Command::new("netsh");
+        let mut cmd = crate::process_util::hidden_command("netsh");
         cmd.args(["advfirewall", "firewall", "show", "rule", "name=all", "dir=in", "verbose"]);
         let (_, out) = run(cmd, Duration::from_secs(30))?;
         Some(parse_netsh_rules(&String::from_utf8_lossy(&out)))

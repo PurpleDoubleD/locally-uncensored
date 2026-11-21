@@ -397,7 +397,7 @@ pub fn mlx_loras_open_folder(_state: &AppState, _args: &Value) -> CmdResult {
     let root = ensure_root()?;
     #[cfg(target_os = "macos")]
     {
-        let mut cmd = std::process::Command::new("open");
+        let mut cmd = crate::process_util::hidden_command("open");
         cmd.arg(&root);
         cmd.spawn()
             .map_err(|e| crate::commands::internal(format!("cannot open {}: {}", root.display(), os_error::english(&e))))?;

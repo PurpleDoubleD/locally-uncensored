@@ -419,7 +419,7 @@ fn taskkill_one(root: u32) {
 fn taskkill(root: u32, with_tree: bool) {
     let pid = root.to_string();
     let args: &[&str] = if with_tree { &["/PID", &pid, "/T", "/F"] } else { &["/PID", &pid, "/F"] };
-    let mut command = Command::new("taskkill.exe");
+    let mut command = crate::process_util::hidden_command("taskkill.exe");
     command.args(args)
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     crate::process_util::suppress_window(&mut command);
