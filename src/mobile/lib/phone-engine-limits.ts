@@ -4,7 +4,7 @@
 // same sentence.
 
 export const REMOTE_ONLY_MODEL =
-  'Inkling 2 Mini does not run on this phone yet. Use it through Remote from your computer.'
+  'Inkling 2 Mini does not run on this phone. Use it through Remote from your computer.'
 
 export function isRemoteOnlyModel(...names: Array<string | null | undefined>): boolean {
   return names.some((name) => !!name && /inkling[-_ ]?2/i.test(name))

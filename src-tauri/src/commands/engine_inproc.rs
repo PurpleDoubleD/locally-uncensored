@@ -1302,7 +1302,7 @@ fn launch(kind: Kind, model_path: &str, n_ctx_req: u32, port: u16, gpu_layers: u
 /// llama-cpp-2 0.1.154 predates Inkling 2, so on a phone it runs through Remote.
 pub(crate) fn refused_architecture(arch: &str) -> Option<&'static str> {
     matches!(arch, "inkling2" | "inkling2_loop")
-        .then_some("Inkling 2 Mini does not run on this phone yet. Use it through Remote from your computer.")
+        .then_some("Inkling 2 Mini does not run on this phone. Use it through Remote from your computer.")
 }
 
 // ── Worker thread (owns model and context) ──────────────────────────────────
