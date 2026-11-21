@@ -1298,6 +1298,13 @@ fn launch(kind: Kind, model_path: &str, n_ctx_req: u32, port: u16, gpu_layers: u
     Ok(Up { child, n_ctx: ready.n_ctx, selftest: ready.selftest, tuning_dropped: ready.tuning_dropped })
 }
 
+/// An architecture this engine is known not to load, with the sentence for it.
+/// llama-cpp-2 0.1.154 predates Inkling 2, so on a phone it runs through Remote.
+pub(crate) fn refused_architecture(arch: &str) -> Option<&'static str> {
+    matches!(arch, "inkling2" | "inkling2_loop")
+        .then_some("Inkling 2 Mini does not run on this phone yet. Use it through Remote from your computer.")
+}
+
 // ── Worker thread (owns model and context) ──────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -1324,6 +1331,11 @@ fn spawn_worker(
         // offloads every layer wherever a GPU backend is compiled in, and on
         // Apple one always is.
         let model_params = model_params_for(gpu_layers);
+        let head = super::gguf::read_model_head(&model_path);
+        if let Some(why) = head.as_ref().and_then(|h| h.arch()).and_then(refused_architecture) {
+            let _ = ready_tx.send(Err(why.to_string()));
+            return;
+        }
         let model = match LlamaModel::load_from_file(backend, &model_path, &model_params) {
             Ok(m) => m,
             Err(e) => {
@@ -2912,6 +2924,15 @@ mod tests {
     fn a_template_llama_cpp_knows_is_used_as_it_is() {
         assert_eq!(decide_format(Some("<|im_start|>{{ role }}"), true, true), Ok(PromptFormat::Gguf));
         assert_eq!(decide_format(Some("<start_of_turn>{{ role }}"), true, false), Ok(PromptFormat::Gguf));
+    }
+
+    #[test]
+    fn inkling_is_refused_with_a_sentence_and_nothing_else_is() {
+        assert!(refused_architecture("inkling2").is_some());
+        assert!(refused_architecture("inkling2_loop").is_some());
+        for arch in ["qwen3", "gemma4", "llama", "lfm3", ""] {
+            assert_eq!(refused_architecture(arch), None, "{arch}");
+        }
     }
 
     #[test]

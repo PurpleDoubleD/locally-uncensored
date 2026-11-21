@@ -10,6 +10,7 @@
  * M2.3 use in chat, M2.4 delete, M2.5 run benchmark, M2.6 view on Hugging
  * Face, M2.7 pick a smaller model, M2.8 use it on LU Cloud.
  */
+import { REMOTE_ONLY_MODEL, isRemoteOnlyModel } from '../../lib/phone-engine-limits'
 import { useMemo, useState } from 'react'
 import { Cloud, Download, ExternalLink, Gauge, Search, Trash2 } from 'lucide-react'
 import type { PlannedDownload } from '../../../api/discover'
@@ -155,8 +156,14 @@ export default function ModelDetailPage() {
   const unreadable = !option && variants?.state === 'failed'
   const empty = !option && variants?.state === 'ready'
 
+  const remoteOnly = isRemoteOnlyModel(name, option?.filename)
+
   const download = async () => {
     if (!option || starting) return
+    if (remoteOnly) {
+      toast(REMOTE_ONLY_MODEL, { tone: 'error', testid: 'remote-only' })
+      return
+    }
     if (option.sharded) {
       toast(S.detail.sharded, { tone: 'error', testid: 'sharded' })
       return
@@ -300,6 +307,10 @@ export default function ModelDetailPage() {
                     {S.detail.cloud}
                   </Button>
                 </>
+              ) : remoteOnly && !file ? (
+                <p className="m-cap" style={{ margin: 0 }} data-testid="m-models-detail-remote-only">
+                  {REMOTE_ONLY_MODEL}
+                </p>
               ) : option && option.plan.length > 0 ? (
                 <Button variant="primary" block icon={Download} testid="m-models-detail-download" el="M2.2" busy={starting} label={S.common.downloadName(name, sizeText)} onPress={() => void download()}>
                   {sizeText ? S.common.downloadSize(sizeText) : S.common.download}
