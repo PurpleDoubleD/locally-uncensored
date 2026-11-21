@@ -205,6 +205,32 @@ describe('GH #174: Duplicate chat and Branch from here', () => {
     expect(useChatStore.getState().activeConversationId).toBe(id)
   })
 
+  it('Agent history: a branch at an answer keeps its hidden tool pairs whole', () => {
+    const at = 1
+    const m = (id: string, role: 'user' | 'assistant' | 'tool', extra: Record<string, unknown> = {}) => ({ id, role, content: id, timestamp: at, ...extra })
+    useChatStore.setState({ activeConversationId: 'tools', conversations: [{
+      id: 'tools', title: 'Tools', model: 'm', systemPrompt: '', createdAt: at, updatedAt: at, mode: 'lu',
+      messages: [
+        m('u1', 'user'),
+        m('h1', 'assistant', { hidden: true, tool_calls: [{ id: 'c1', function: { name: 'read', arguments: {} } }] }),
+        m('h2', 'tool', { hidden: true, tool_call_id: 'c1' }),
+        m('a1', 'assistant'),
+        m('u2', 'user'),
+        m('h3', 'assistant', { hidden: true, tool_calls: [{ id: 'c2', function: { name: 'read', arguments: {} } }] }),
+        m('h4', 'tool', { hidden: true, tool_call_id: 'c2' }),
+        m('a2', 'assistant'),
+      ],
+    }] as never })
+    for (const [endAt, want] of [['a1', 4], ['a2', 8]] as const) {
+      const copy = get(useChatStore.getState().duplicateConversation('tools', { endAt })!)
+      expect(copy.messages).toHaveLength(want)
+      const called = copy.messages.flatMap((x) => x.tool_calls?.map((c) => c.id) ?? [])
+      const answered = copy.messages.flatMap((x) => (x.tool_call_id ? [x.tool_call_id] : []))
+      expect(answered).toEqual(called)
+    }
+    expect(get('tools').messages).toHaveLength(8)
+  })
+
   it('an unknown chat or message makes no copy', () => {
     seed()
     expect(useChatStore.getState().duplicateConversation('nope')).toBeNull()

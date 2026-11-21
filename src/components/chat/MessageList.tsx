@@ -20,6 +20,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { latestRefusalId, refusalNoticeApplies } from '../../lib/refusal-detect'
 import { GreetingSwitcher } from './GreetingSwitcher'
 import { forkMarks } from '../../lib/chat-forks'
+import { useChatNoticeStore, CHAT_NOTICE_MS } from '../../stores/chatNoticeStore'
 import { hasLaterRounds, isSpeakerTurn, laterAnswersInRound } from '../../lib/group-rounds'
 import { historyTrimNote } from '../../lib/history-trim-note'
 import { displayModelName } from '../../api/providers'
@@ -203,7 +204,13 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
 
   const handleBranch = useCallback((messageId: string) => {
     const c = bind.current.conversation
-    if (c) useChatStore.getState().duplicateConversation(c.id, { endAt: messageId })
+    if (!c) return
+    // 3.1.3 (David on purple): from the last answer the new chat looks exactly
+    // like the old one, so without a word the click seemed to do nothing.
+    const id = useChatStore.getState().duplicateConversation(c.id, { endAt: messageId })
+    const title = useChatStore.getState().conversations.find((x) => x.id === id)?.title
+    if (id) useChatNoticeStore.getState().show('chat-branched', `New chat opened: ${title}. The original stays as it was.`, 'ruhig', CHAT_NOTICE_MS)
+    else useChatNoticeStore.getState().show('chat-branched', 'This message could not be branched.', 'fehler', CHAT_NOTICE_MS)
   }, [])
 
   // Which message carries the switch of which kept version. Recomputed only
@@ -344,7 +351,9 @@ export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel
                 // Switching while a turn streams would move the bubble the
                 // stream writes into out of the thread.
                 onSwitchFork={isGenerating || readOnly ? undefined : handleSwitchFork}
-                onBranch={readOnly ? undefined : handleBranch}
+                // Not while this chat writes: the copy would hold half an answer
+                // and none of the run's tool steps, which are saved at its end.
+                onBranch={readOnly || isThisChatGenerating ? undefined : handleBranch}
                 readOnly={readOnly}
                 declined={message.id === declinedId}
                 speakerName={speakerNameOf(message, speakers, authors)}
