@@ -62,7 +62,9 @@ import { trainerPathPlaceholder } from '../../../lib/trainer-path-placeholder'
 import { trainerRootHint } from '../../../lib/trainer-root-hint'
 import { useCreateExp } from './CreateContext'
 import { useHubRun } from './hub/hubRun'
-import { TrainHead, TrainMore, TrainRow, TrainWord } from './hub/TrainParts'
+import { TrainHead, TrainMore, TrainRow, TrainStart, TrainWord } from './hub/TrainParts'
+import { TrainerDownloadLine } from './TrainerDownloadLine'
+import { ModelChip } from './ModelChip'
 import { swapLocalProblem } from '../../../lib/create/swap-local'
 import { CharacterUseLocally } from './CharacterUseLocally'
 import { CLOUD_TRAINING_FAMILY_NOTE, localTrainingFamilyNote } from '../../../api/character-import'
@@ -196,6 +198,7 @@ function CharacterPanel() {
             help="You type this word in a prompt to get this face."
             after={<TriggerWordNote />}
           />
+          <TrainStart hint={trainImages.length < MIN_TRAIN_IMAGES ? `Add at least ${MIN_TRAIN_IMAGES} photos first.` : 'Type a trigger word first.'} />
           {/* Said before the training, not after it (3.0.8): only a Z-Image
               character can come to this computer. */}
           <p data-testid="cloud-train-family-note" className={`w-full text-center t-micro ${HINWEIS_TEXT.ruhig}`}>
@@ -551,18 +554,14 @@ function LocalTrainControls() {
     setNote(s?.basesReady ? null : baseStartFailedNote(alreadyThere, startProblems.current))
   }
 
-  // While the page has its own button (set up, download) the prompt window
-  // has nothing to start and stands back.
-  const setTrainWindow = useHubRun((st) => st.setTrainWindow)
-  const setupNeeded = !status || !status.envReady || !status.basesReady
-  useEffect(() => { setTrainWindow(setupNeeded ? 'hidden' : 'start'); return () => setTrainWindow(null) }, [setupNeeded, setTrainWindow])
   if (!status) {
     return <div className="hub-dim hub-fs-13 text-center">Checking the local trainer…</div>
   }
   if (!status.envReady || (busy === 'install' && status.install.status === 'installing')) {
     return (
       <div className="hub-train">
-        <TrainHead now="trainer" title="Set up the trainer" line="One-time download, about 3 GB. Training runs on your graphics card." />
+        <TrainHead now="trainer" title="Set up the trainer" line="A one-time setup. Training then runs on your graphics card." />
+        <TrainerDownloadLine />
         <Button size="lg" variant="primary" icon={Download} loading={busy === 'install'} disabled={busy === 'install'} onClick={startInstall}>
           {busy === 'install' ? 'Setting up…' : 'Set up trainer'}
         </Button>
@@ -655,9 +654,11 @@ function LocalTrainControls() {
         </div>
       )}
       {note && <div role="status" tabIndex={0} className="hub-dim hub-fs-125 max-w-[460px] max-h-40 overflow-y-auto select-text whitespace-pre-wrap text-center break-words">{note}</div>}
+      <TrainStart hint={trainImages.length < MIN_TRAIN_IMAGES ? `Add at least ${MIN_TRAIN_IMAGES} photos first.` : 'Type a trigger word first.'} />
       {!isGenerating && (
         <TrainMore open={trainKind === 'style'}>
           <TrainKindPicker />
+          <ModelChip />
           {/* Die Klammer nennt die Stufe UND die Zahl (Kampagne 3.0.0, Fund 2). */}
           <div className="hub-dim hub-fs-125 max-w-[460px] text-center">Runs on your GPU and takes a while ({trainStepsNote(trainSteps, presets)}). The local chat model pauses for the run. The {word} lands in your local LoRAs.</div>
           <div className="hub-dim hub-fs-125 max-w-[460px] text-center" data-testid="local-train-family-note">{localTrainingFamilyNote(trainKind)}</div>
@@ -758,9 +759,11 @@ function MacTrainControls() {
           options={presets.map((p) => ({ value: String(p.steps), label: p.label }))}
         />
       </TrainRow>
+      <TrainStart hint={trainImages.length < MIN_TRAIN_IMAGES ? `Add at least ${MIN_TRAIN_IMAGES} photos first.` : 'Type a trigger word first.'} />
       {!isGenerating && (
         <TrainMore open={trainKind === 'style'}>
           <TrainKindPicker />
+          <ModelChip />
           <div className="hub-dim hub-fs-125 text-center max-w-[460px]" data-testid="mac-train-hint">
             {macTrainNote(trainStepsNote(trainSteps, presets), status, trainKind)}{' '}
             <button

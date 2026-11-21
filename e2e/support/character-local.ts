@@ -64,6 +64,10 @@ export async function bootLocal(page: Page, { trainer = 'ready', videoModels = t
     }
     bridge.invoke = (command, args) => {
       if (command === 'sniff_model_files') return Promise.resolve([])
+      if (command === 'trainer_setup_plan') {
+        // The estimate of commands/trainer.rs (PLAN_*_BYTES).
+        return Promise.resolve({ items: [{ label: 'Python', bytes: 60_000_000 }, { label: 'trainer source', bytes: 5_000_000 }, { label: 'PyTorch', bytes: 2_500_000_000 }, { label: 'packages', bytes: 500_000_000 }], downloadBytes: 3_065_000_000, diskGib: 12, replacesTorch: false, interrupted: false })
+      }
       if (command === 'character_trainer_status') {
         const missing = trainer === 'ready' ? [] : [{ filename: 'z_image_bf16.safetensors', subfolder: 'diffusion_models', bytes: 12_309_866_400 }]
         return Promise.resolve({

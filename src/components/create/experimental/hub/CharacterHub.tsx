@@ -140,6 +140,7 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
     setHubStep('new')
   }
   const fromNew = useCreateStore((s) => !!s.hubNewDraft)
+  const cloudTraining = useCreateStore((s) => s.backend === 'cloud')
 
   const pick = (c: HubCharacter | null) => {
     setHubCharacter(c)
@@ -175,8 +176,8 @@ export function CharacterHub({ stage, onOpenGallery }: Props) {
             {/* What is next and its button first, the photos under it. */}
             <HubPanel />
             <div className="empty:hidden"><Stage hub {...stage} /></div>
-            {/* What the training runs on, said on its page. */}
-            <div className="flex justify-center pt-1 empty:hidden" data-hub-train-model><ModelChip /></div>
+            {/* On the cloud the trainer is a choice; locally it is a note under More options. */}
+            {cloudTraining && <div className="flex justify-center pt-1 empty:hidden" data-hub-train-model><ModelChip /></div>}
           </div>
         </div>
       </div>

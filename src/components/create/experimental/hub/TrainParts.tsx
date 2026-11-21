@@ -4,8 +4,10 @@
 // the trainer (SpecialIntentControls does).
 
 import type { ReactNode } from 'react'
-import { ArrowRight, Check, ChevronDown } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Sparkles, X } from 'lucide-react'
+import { Button } from '../../ui/Button'
 import { cn } from '../../ui/cn'
+import { useHubRun } from './hubRun'
 
 export type TrainStep = 'trainer' | 'bases' | 'train'
 
@@ -72,6 +74,21 @@ export function TrainRow({ label, children }: { label: string; children: ReactNo
       <span className="hub-muted hub-fs-13">{label}</span>
       {children}
     </div>
+  )
+}
+
+/** The one main button of the page, right under the settings: the same place
+ *  as "Set up trainer". The run itself is the Composer's. */
+export function TrainStart({ hint }: { hint?: string }) {
+  const start = useHubRun((s) => s.trainStart)
+  if (!start) return null
+  if (start.running) return <Button variant="danger" size="lg" icon={X} onClick={start.cancel}>Cancel</Button>
+  return (
+    <span className="inline-flex" title={start.ready ? undefined : hint}>
+      <Button variant="primary" size="lg" icon={Sparkles} disabled={!start.ready} onClick={start.run}>
+        {start.price ? `Start training · ${start.price}` : 'Start training'}
+      </Button>
+    </span>
   )
 }
 

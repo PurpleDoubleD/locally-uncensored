@@ -42,6 +42,10 @@ interface HubRunState {
    *  download), 'start' when the window's button starts the training. */
   trainWindow: 'hidden' | 'start' | null
   setTrainWindow: (w: 'hidden' | 'start' | null) => void
+  /** The run of the training, said by the Composer for the button on the
+   *  training page (the window itself does not stand on that page). */
+  trainStart: { ready: boolean; running: boolean; price: string | null; run: () => void; cancel: () => void } | null
+  setTrainStart: (v: HubRunState['trainStart']) => void
   setWindow: (prompt: boolean, negative: boolean) => void
   setStage: (stage: HubStageSlot | null) => void
   setSwap: (swap: HubRun | null) => void
@@ -53,6 +57,8 @@ export const useHubRun = create<HubRunState>((set) => ({
   window: { prompt: false, negative: false },
   trainWindow: null,
   setTrainWindow: (trainWindow) => set({ trainWindow }),
+  trainStart: null,
+  setTrainStart: (trainStart) => set({ trainStart }),
   setWindow: (prompt, negative) => set((s) => (s.window.prompt === prompt && s.window.negative === negative ? s : { window: { prompt, negative } })),
   setStage: (stage) => set({ stage }),
   setSwap: (swap) => set({ swap }),

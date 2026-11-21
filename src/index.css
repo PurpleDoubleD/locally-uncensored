@@ -3276,8 +3276,9 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 /* Two equal columns, so the gap between them lies exactly on the middle axis
    of the prompt window, and the block stands in the middle of the room like
    the page before it. It may scroll on a low window, without a bar. */
-.lu-hub .hub-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: safe center; gap: 28px; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 8px 0 4px; scrollbar-width: none; }
-.lu-hub .hub-new::-webkit-scrollbar { width: 0; height: 0; }
+.lu-hub .hub-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; padding: 12px 0 10px; }
+.lu-hub .hub-new-scroll { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.lu-hub .hub-new-scroll::-webkit-scrollbar { width: 0; height: 0; }
 .lu-hub .hub-new input.hub-name-field { outline: none; box-shadow: none; }
 .lu-hub .hub-after { margin-top: 22px; padding-top: 2px; }
 .lu-hub .hub-train-scroll { display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; overflow-y: auto; scrollbar-width: none; }
@@ -3297,6 +3298,7 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 
 /* The training page: what is next and its one button, on the middle axis. */
 .lu-hub .hub-train { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; padding: 18px 0 14px; }
+.lu-hub .hub-train [data-testid="trainer-download-line"] { max-width: 460px; text-transform: none; letter-spacing: normal; font-size: calc(12.5px / var(--ui-scale, 1.15)); }
 .lu-hub .hub-train-steps { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
 .lu-hub .hub-train-input { height: 40px; padding: 0 12px; border: 1px solid var(--hub-edge); border-radius: 8px; background: transparent; outline: none; font-size: calc(15px / var(--ui-scale, 1.15)); }
 .lu-hub .hub-train-input:focus { border-color: var(--hub-acc); }
@@ -3314,10 +3316,5 @@ input[type="range"].neuron-range:disabled { cursor: not-allowed; opacity: 0.5; }
 /* No character yet: the three steps and the one button, in the middle. */
 .lu-hub .hub-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 16px 0; }
 .lu-hub .hub-steps { width: 100%; max-width: 420px; border-top: 1px solid var(--hub-sep); }
-/* On the training page the window is only its button, in the middle. */
-[data-hub-train-window] { background: transparent !important; border-color: transparent !important; }
-[data-hub-train-window] > div { justify-content: center; border-top: 0 !important; }
-[data-hub-train-window] > div > .flex-1 { flex: none; width: 0; }
-
 /* The NEW mark on the Character pill: accent on a faint accent ground. */
 .lu-new-mark { font-size: 7px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.4; }

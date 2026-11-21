@@ -192,6 +192,8 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
         <span className="hub-text font-medium">New character</span>
       </div>
 
+      <div className="hub-new-scroll">
+      <div className="hub-center">
       <div className="hub-new">
         <div className="min-w-0">
           <div className="mb-2 flex items-baseline justify-between">
@@ -351,7 +353,7 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
         </div>
       </div>
 
-      <div className="shrink-0 pb-3 pt-2">
+      <div className="pb-3 pt-2">
         {(error || added) && (
           <p role={error ? 'alert' : 'status'} className={cn('pb-2 hub-fs-125', error ? 'text-red-500 dark:text-red-400' : 'hub-muted')} data-hub-new-message>
             {error ?? `${clean} is in your LoRA folder. ${added?.note}`}
@@ -368,6 +370,8 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
             <Button variant="primary" size="md" disabled={added ? false : !ready} onClick={() => { if (added) onSaved(added.character); else void save() }}>{button}</Button>
           </span>
         </div>
+      </div>
+      </div>
       </div>
     </div>
   )

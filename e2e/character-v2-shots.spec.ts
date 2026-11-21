@@ -51,7 +51,7 @@ test('shots: cloud sheet and motion without model', async ({ page }) => {
   await page.locator('[data-hub-action="image"]').click()
 })
 
-const axis = async (page: Page) => { const w = (await page.locator('[data-prompt-window]').boundingBox())!; return w.x + w.width / 2 }
+const axis = async (page: Page) => { const w = (await page.locator('[data-character-hub]').boundingBox())!; return w.x + w.width / 2 }
 const posted = (page: Page) => page.evaluate(() => (window as unknown as { __PROMPTS__: string[] }).__PROMPTS__.map((p) => (JSON.parse(p) as { prompt: unknown }).prompt)) as Promise<Graph[]>
 const onTop = (page: Page, sel: string) => page.locator(sel).first().evaluate((el) => {
   const r = el.getBoundingClientRect()
@@ -70,7 +70,14 @@ test('New character: on the middle axis of the page before it, no scrollbar, air
   const cols = await page.locator('.hub-new').evaluate((el) => [...el.children].map((c) => c.getBoundingClientRect()).map((r) => [r.left, r.right]))
   // The gap between the two columns lies on the axis.
   expect(Math.abs((cols[0][1] + cols[1][0]) / 2 - mid)).toBeLessThanOrEqual(1)
-  const m = await page.locator('.hub-new').evaluate((el) => ({ bar: (el as HTMLElement).offsetWidth - el.clientWidth, over: el.scrollHeight - el.clientHeight }))
+  // Nothing of the window under an unsaved character, the line is said once.
+  await expect(page.locator('[data-prompt-window], [data-hub-actions], [data-hub-local-line]')).toHaveCount(0)
+  await expect(page.getByText('Save the character first.')).toHaveCount(0)
+  await expect(page.locator('[data-hub-after]')).toHaveCount(1)
+  const room = (await page.locator('.hub-new-scroll').boundingBox())!
+  const block = (await page.locator('.hub-new-scroll > .hub-center').boundingBox())!
+  expect(Math.abs((block.y + block.height / 2) - (room.y + room.height / 2))).toBeLessThanOrEqual(2)
+  const m = await page.locator('.hub-new-scroll').evaluate((el) => ({ bar: (el as HTMLElement).offsetWidth - el.clientWidth, over: el.scrollHeight - el.clientHeight }))
   expect(m.bar).toBe(0)
   expect(m.over).toBeLessThanOrEqual(0)
   const way = (await page.locator('[data-hub-way="train"]').boundingBox())!
@@ -91,8 +98,9 @@ test('Train: one clear next step, its button on top; back keeps photos, name, wo
   await expect(main).toBeVisible()
   expect((await main.boundingBox())!.height).toBeGreaterThanOrEqual(38)
   expect(await onTop(page, 'button:has-text("Set up trainer")')).toBe(true)
-  // Nothing else offers to start: the window stands back.
-  await expect(page.locator('[data-prompt-window]')).toHaveCount(0)
+  // Nothing else offers to start: no window, no row of actions.
+  await expect(page.locator('[data-prompt-window], [data-hub-actions]')).toHaveCount(0)
+  await expect(page.getByTestId('trainer-download-line')).toContainText('about 2.9 GB')
   await expect(page.locator('[data-hub-train-photos]')).toHaveAttribute('data-hub-train-photos', '9')
   // One photo less on this page: the way back brings that state.
   await page.locator('[data-hub-train-photos] .hub-train-photo').first().hover()
@@ -120,8 +128,15 @@ test('Train ready: the word is a labelled field, the window button starts the tr
   await page.locator('[data-hub-back]').click()
   await page.getByRole('button', { name: 'Continue to training' }).click()
   await expect(page.getByRole('textbox', { name: 'Trigger word' })).toHaveValue('maraface')
-  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: 'Start training' })).toBeEnabled()
-  await expect(page.locator('[data-prompt-window] textarea')).toHaveCount(0)
+  const start = page.getByRole('button', { name: 'Start training' })
+  await expect(start).toBeEnabled()
+  await expect(page.locator('[data-prompt-window], [data-hub-actions]')).toHaveCount(0)
+  // Directly under the settings, above the folded options and the photos.
+  const memory = (await page.locator('[data-hub-train-row="Graphics memory"]').boundingBox())!
+  const b = (await start.boundingBox())!
+  expect(b.y).toBeGreaterThan(memory.y + memory.height - 1)
+  expect(b.y - (memory.y + memory.height)).toBeLessThanOrEqual(24)
+  await expect(page.getByText('Local training uses Z-Image')).toBeHidden()
 })
 
 test('Image with a photo character runs inside the Character area, no second line, no way to Edit', async ({ page }) => {

@@ -481,16 +481,14 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const hubStage = useHubRun((st) => st.stage)
   const hubRun = hub ? (hubSwap ?? hubStage?.run ?? null) : null
   const hubField = hubRun?.field ?? null
-  // The training page (3.1.3): no text field, the one button says what it
-  // does, and while the page has its own button the window stands back.
-  const hubTrainWindow = useHubRun((st) => st.trainWindow)
+  // The training page and the unsaved new character (3.1.3) have no window.
+  const hubStep = useCreateStore((s) => s.hubStep)
   const hubTraining = hub && intent === 'character' && characterTab === 'train'
   const hubAction = actionOfIntent(intent)
   // The field stands on every action. Where the action takes no text, it
   // says so and takes none.
   const hubNoText = hub && !needPrompt && !hubField
   const hubNote = !hub ? null
-    : hubTraining ? null
     : hubRun ? (!hubRun.ready && !hubRun.running ? hubRun.hint ?? null : null)
       : showNoPromptHint && !needsMask && isInputHint(intent) ? laneCaption : null
   // The video of Swap and Motion can come in through the window as well.
@@ -498,11 +496,24 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const setHubWindow = useHubRun((st) => st.setWindow)
   const hubTakesNegative = needPrompt && !optionalPrompt && negSupported
   useEffect(() => { if (hub) setHubWindow(needPrompt && !hubField, hubTakesNegative) }, [hub, needPrompt, hubField, hubTakesNegative, setHubWindow])
+  const setTrainStart = useHubRun((st) => st.setTrainStart)
+  const trainDoes = useRef({ run: guardedGenerate, cancel: guardedCancel })
+  useEffect(() => { trainDoes.current = { run: guardedGenerate, cancel: guardedCancel } })
+  useEffect(() => {
+    if (!hubTraining) return
+    setTrainStart({ ready: canGenerate, running: isGenerating, price: createPrice ?? null, run: () => trainDoes.current.run(), cancel: () => trainDoes.current.cancel() })
+  }, [hubTraining, canGenerate, isGenerating, createPrice, setTrainStart])
+  useEffect(() => { if (!hubTraining) setTrainStart(null) }, [hubTraining, setTrainStart])
   const submit = () => {
     if (hubRun) { if (hubRun.ready && !hubRun.running) hubRun.run(); return }
     if (canGenerate && !isGenerating) guardedGenerate()
   }
 
+
+  // The training page has its one button in the page (TrainStart); until a
+  // new character is saved there is nothing to run. On both, no row and no
+  // window under the page (David, 21.11.2026).
+  if (hubTraining || (hub && hubStep === 'new')) return null
 
   return (
     // A stable min-height (bottom-anchored) so the prompt window occupies the
@@ -536,8 +547,8 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
           <p className="t-body text-gray-500 text-center px-3.5" data-testid="lane-input-note">{laneCaption}</p>
         )}
 
-        {!(hubTraining && hubTrainWindow === 'hidden' && !isGenerating) && <div data-hub-train-window={hubTraining || undefined} className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors" data-prompt-window>
-          {(needPrompt || hub) && !hubTraining && (
+        <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors" data-prompt-window>
+          {(needPrompt || hub) && (
             // The prompt assistant (B43) sits in the field's corner, not in the
             // action bar: there every pixel is the model chip's, whose whole
             // name has to fit at 760 px (FEHLER-Q4 #2). The field keeps its
@@ -733,7 +744,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 </div>
               </Tooltip>
             )}
-            {hub && !hubTraining && (
+            {hub && (
               // The one settings icon of the window: the model, the size and
               // everything else of the tab (AdvancedDrawer).
               <Tooltip content="Model, size and all other settings.">
@@ -768,12 +779,12 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                   {/* Swap Character names its price on the button (the web's
                       CreateButton): a paid video run, priced by its length. */}
                   {/* With a new voice the lip sync step is in the figure too. */}
-                  {hubTraining ? (createPrice ? `Start training · ${createPrice}` : 'Start training') : createPrice ? `Create · ${createPrice}` : 'Create'}
+                  {createPrice ? `Create · ${createPrice}` : 'Create'}
                 </Button>
               </span>
             )}
           </div>
-        </div>}
+        </div>
       </div>
     </div>
   )

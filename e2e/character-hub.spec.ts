@@ -536,7 +536,8 @@ test('no character yet: the three steps, one button and the same window', async 
   await page.locator('[data-hub-new-name]').fill('Oma')
   await expect(page.locator('[data-hub-save-summary]')).toHaveText('5 photos · kept on this computer · free')
   await shoot(page, 'neu-mit-fotos')
-  await expectWindowAt(page, onImage)
+  // Until it is saved nothing stands under the page: no row, no window.
+  await expect(page.locator('[data-prompt-window], [data-hub-actions]')).toHaveCount(0)
   await page.getByRole('button', { name: 'Save Oma', exact: true }).click()
   await expect(hub).toHaveAttribute('data-character-hub', 'panel')
   await expect(page.locator('[data-hub-tab-name]')).toHaveText('Oma')
