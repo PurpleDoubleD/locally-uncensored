@@ -207,7 +207,7 @@ export async function trainerSetupPlan(): Promise<TrainerSetupPlan> {
 
 /** The line before the start. null when the setup has nothing to load. */
 export function trainerPlanLine(plan: TrainerSetupPlan): string | null {
-  if (plan.items.length === 0) return null
+  if (!plan?.items?.length) return null
   const what = plan.items.map((i) => i.label).join(', ')
   const lead = plan.interrupted ? 'The last setup was stopped. Loads again' : 'Loads'
   return `${lead} ${aboutSize(plan.downloadBytes)}: ${what}. Needs ${plan.diskGib} GB free.`
