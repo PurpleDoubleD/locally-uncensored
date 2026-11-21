@@ -85,11 +85,14 @@ describe('where the line shows', () => {
   })
 
   it('never on an add-on: its model\'s tile speaks for it', () => {
-    const addon = [...getImageBundles(), ...getVideoBundles()].find((b) => b.addonFor && b.vramMinGB && b.vramMinGB > 12)
-    expect(addon, 'an add-on the 12 GB card is below').toBeDefined()
+    // No add-on in the catalogue is above 12 GB any more (the H3 turbo LoRA
+    // was), so a real one is given that need.
+    const found = [...getImageBundles(), ...getVideoBundles()].find((b) => b.addonFor && b.vramMinGB)
+    expect(found, 'an add-on with a number').toBeDefined()
+    const addon = { ...found!, vramMinGB: 24, vramComfortGB: 24 }
     render(
       <BundleTile
-        bundle={addon!} vramGb={12} cloudTask="video"
+        bundle={addon} vramGb={12} cloudTask="video"
         complete={false} downloading={false} hasErrors={false}
         onInstall={noop} onRetry={noop} onClear={noop} onOpenUrl={noop}
       />,

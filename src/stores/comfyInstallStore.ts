@@ -156,6 +156,9 @@ interface ComfyInstallState {
   runRepair: () => Promise<void>
   /** Ask Rust to stop whatever is running. */
   cancel: () => Promise<void>
+  /** Run the last install, update or repair once more, with the same target.
+   *  3.1.3: "Install Git" calls this once git is there. */
+  again: () => Promise<void>
   /** Back to a clean panel. Used by tests and by a fresh start. */
   reset: () => void
 }
@@ -243,10 +246,21 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
     set({ phase: 'error', cancelling: false, error: message })
   }
 
+  /** The last run and its target, for `again`. */
+  let last: { kind: ComfyInstallKind; installPath: string } | null = null
+
   return {
     ...IDLE,
 
+    again: async () => {
+      if (!last) return
+      if (last.kind === 'install') return get().runInstall(last.installPath)
+      if (last.kind === 'update') return get().runUpdate()
+      return get().runRepair()
+    },
+
     runInstall: async (installPath: string) => {
+      last = { kind: 'install', installPath }
       // Pre-flight: pip needs a Python before ComfyUI can be installed. The
       // carcass case lands here too, the previous run may have died on the
       // Microsoft Store stub.
@@ -327,6 +341,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
     },
 
     runUpdate: async () => {
+      last = { kind: 'update', installPath: '' }
       begin('comfyui', 'update', 'Updating ComfyUI…')
       try {
         await backendCall('update_comfyui')
@@ -338,6 +353,7 @@ export const useComfyInstallStore = create<ComfyInstallState>()((set, get) => {
     },
 
     runRepair: async () => {
+      last = { kind: 'repair', installPath: '' }
       begin('repair', 'repair', 'Repairing the ComfyUI environment…')
       try {
         await backendCall('repair_comfyui_env')

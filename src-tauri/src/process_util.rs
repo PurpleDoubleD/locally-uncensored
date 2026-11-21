@@ -259,6 +259,17 @@ pub fn strip_appimage_env_tokio(cmd: &mut tokio::process::Command) {
 pub fn foreign_system_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     let mut cmd = Command::new(program);
     strip_appimage_env(&mut cmd);
+    suppress_window(&mut cmd);
+    cmd
+}
+
+/// A program LU ships itself (a sidecar) or a system tool that must keep the
+/// AppImage environment: no environment cleanup, but like every start of LU
+/// no console window on Windows (3.1.3). A GUI program is not affected by the
+/// flag. The guard `no_console_window_guard` keeps raw starts out.
+pub fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let mut cmd = Command::new(program);
+    suppress_window(&mut cmd);
     cmd
 }
 
@@ -267,6 +278,8 @@ pub fn foreign_system_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command 
 pub fn foreign_system_command_tokio<S: AsRef<std::ffi::OsStr>>(program: S) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(program);
     strip_appimage_env_tokio(&mut cmd);
+    #[cfg(windows)]
+    cmd.creation_flags(no_window());
     cmd
 }
 
@@ -1229,7 +1242,7 @@ mod command_new_coverage_guard {
     /// `//`, so a doc comment mentioning `Command::new(...)` as an example
     /// (os_paths.rs, install/ollama.rs) needs no exception of its own.
     const SCOPED_FILES: &[(&str, usize)] = &[
-        ("src/process_util.rs", 2), // foreign_system_command + its tokio twin
+        ("src/process_util.rs", 3), // foreign_system_command, its tokio twin, hidden_command
         ("src/python.rs", 1),       // python_command's own body
         ("src/commands/bg_tasks.rs", 0),
         ("src/commands/self_migrate.rs", 0),
@@ -1247,12 +1260,9 @@ mod command_new_coverage_guard {
         ("src/commands/install/lmstudio_install.rs", 0),
         ("src/commands/install/ollama.rs", 0),
         ("src/commands/install/children.rs", 0),
-        // Runde 3, Nachbesserung 3: the foreground shell spawn now goes
-        // through `foreign_system_command` too, matching its background
-        // twin (bg_tasks.rs). The remaining 1 is `taskkill.exe` at
-        // shell.rs:204, `#[cfg(windows)]`-gated and windows-only exactly
-        // like the review's own Ausnahmeliste for that file names.
-        ("src/commands/shell.rs", 1),
+        // Runde 3, Nachbesserung 3: the foreground shell spawn goes through
+        // `foreign_system_command`, `taskkill.exe` through `hidden_command`.
+        ("src/commands/shell.rs", 0),
         // Trainer-3.0.1-Folgeauftrag B1 (bau/engine.md, Nachbesserung 11):
         // every foreign program trainer.rs starts (winget, the venv's own
         // python, the two pip installs, the four musubi-tuner steps) now
@@ -1260,21 +1270,11 @@ mod command_new_coverage_guard {
         // in shipping code; trainer.rs spawns no bundled sidecar of its
         // own, unlike engine.rs below.
         ("src/commands/trainer.rs", 0),
-        // Same Nachbesserung, engine.rs half: these 2 are NOT foreign
-        // programs, they are engine.rs's own two llama-server spawns (the
-        // chat/completion server and the embeddings server), our own
-        // bundled sidecar. K11/K14's doc comment on foreign_system_command
-        // is explicit that a bundled sidecar stays raw, it needs exactly
-        // the AppImage-bundled libraries the adapter would strip out.
-        // 3.0.8 (A2) adds the third: the same sidecar asked
-        // `--list-devices` to find the chat card's Vulkan device. A14 (3.0.8)
-        // a fourth, the same sidecar started for the refusal-removal tool's
-        // check (`spawn_private_server`).
-        ("src/commands/engine.rs", 4),
-        // The refusal-removal tool's one raw spawn is `lu-llama-quantize`,
-        // a sidecar LU ships next to the engine; its Python steps go through
-        // python_command.
-        ("src/commands/abliterate/mod.rs", 1),
+        // The bundled llama-server keeps its AppImage environment, so its
+        // starts use `hidden_command` rather than the foreign adapter.
+        ("src/commands/engine.rs", 0),
+        // `lu-llama-quantize`, a sidecar, through `hidden_command`.
+        ("src/commands/abliterate/mod.rs", 0),
         // The login shell that is asked for the user's PATH on a Mac is a
         // foreign program like any other and goes through the adapter.
         ("src/finder_path.rs", 0),
@@ -1457,5 +1457,90 @@ mod mac_only_port_sweep_guard {
         assert!(ungated_calls(block).is_empty());
         assert!(ungated_calls(comment).is_empty());
         assert_eq!(ungated_calls(bare), vec![3]);
+    }
+}
+
+/// 3.1.3 (David on purple): an empty console stood open through the whole
+/// install. Every process LU starts goes through a helper that sets
+/// CREATE_NO_WINDOW. This walks all of `src`, so a new file is covered too.
+#[cfg(test)]
+mod no_console_window_guard {
+    use std::path::Path;
+
+    /// The helpers themselves, the only raw starts in shipping code.
+    const HELPERS: &[(&str, usize)] = &[("src/process_util.rs", 3), ("src/python.rs", 1)];
+    /// Replaces the flags on purpose: Blender's GUI launcher gets no_window,
+    /// `blender.exe` DETACHED_PROCESS, so neither opens a console.
+    const OWN_FLAGS: &[&str] = &["cmd.creation_flags(flags | CREATE_NEW_PROCESS_GROUP);"];
+
+    fn shipping(src: &str) -> &str {
+        let at = [src.find("#[cfg(test)]"), src.find("#[cfg(all(test")].into_iter().flatten().min();
+        at.map_or(src, |at| &src[..at])
+    }
+
+    fn walk(dir: &Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let rel = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap().to_string_lossy().replace('\\', "/");
+                out.push((rel, std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+
+    fn raw_starts(src: &str) -> usize {
+        shipping(src).lines().filter(|l| !l.trim_start().starts_with("//")).map(|l| l.matches("Command::new(").count()).sum()
+    }
+
+    fn flags_without_no_window(src: &str) -> Vec<String> {
+        shipping(src)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//") && l.contains("creation_flags("))
+            .filter(|l| !l.contains("NO_WINDOW") && !l.contains("no_window()") && !l.contains("0x08000000"))
+            .filter(|l| !OWN_FLAGS.contains(l))
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn every_process_start_goes_through_a_helper_without_a_console() {
+        let mut files = Vec::new();
+        walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        assert!(files.len() > 100);
+        let mut bad = Vec::new();
+        for (rel, src) in &files {
+            let allowed = HELPERS.iter().find(|(f, _)| f == rel).map_or(0, |(_, n)| *n);
+            let found = raw_starts(src);
+            if found != allowed {
+                bad.push(format!("{rel}: {found} raw Command::new, allowed {allowed}; use hidden_command or foreign_system_command"));
+            }
+            for line in flags_without_no_window(src) {
+                bad.push(format!("{rel}: creation_flags replaces CREATE_NO_WINDOW: {line}"));
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
+    #[test]
+    fn the_helpers_set_the_flag() {
+        let src = include_str!("process_util.rs");
+        for (head, needle) in [
+            ("pub fn foreign_system_command<", "suppress_window(&mut cmd);"),
+            ("pub fn hidden_command<", "suppress_window(&mut cmd);"),
+            ("pub fn foreign_system_command_tokio<", "cmd.creation_flags(no_window());"),
+        ] {
+            let body = &src[src.find(head).unwrap()..];
+            assert!(body[..body.find("\n}\n").unwrap()].contains(needle), "{head}");
+        }
+        assert!(include_str!("python.rs").contains("cmd.creation_flags(CREATE_NO_WINDOW);"));
+    }
+
+    #[test]
+    fn the_guard_sees_a_raw_start_and_a_replaced_flag() {
+        assert_eq!(raw_starts("fn a() { std::process::Command::new(\"git\"); }\n#[cfg(test)]\nmod t { fn b() { Command::new(\"x\"); } }"), 1);
+        assert_eq!(flags_without_no_window("cmd.creation_flags(0x200);\ncmd.creation_flags(CREATE_NO_WINDOW);").len(), 1);
     }
 }

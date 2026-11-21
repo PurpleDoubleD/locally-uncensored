@@ -44,10 +44,13 @@ in the cloud catalogue.
 - **Agent mode turns on right away.** On the first message the agent asks in
   the chat: sandbox or folder. Your message waits and carries on after the
   choice. The badge next to Agent says "Choose…" until you pick.
-- **MiniMax H3 Image runs on LU's own workflow.** Your prompt, the size, the
-  number of pictures and up to four reference pictures go in, and Edit works
-  with it. An imported copy of the official template is skipped with a note,
-  because LU could not put your prompt into it.
+- **MiniMax H3 and FastH3 are no longer offered for download.** Their license
+  leaves out the EU, the UK, South Korea and the USA. Files you already have
+  stay on your computer and keep working.
+- **MiniMax H3 Image runs on LU's own workflow** with the files you already
+  have. Your prompt, the size, the number of pictures and up to four reference
+  pictures go in, and Edit works with it. An imported copy of the official
+  template is skipped with a note, because LU could not put your prompt into it.
 - **The Character tab** has a short menu behind the three dots of the active
   tab instead of the card on the stage.
 - **The search in Discover** looks through Mainstream and Unfiltered for text,

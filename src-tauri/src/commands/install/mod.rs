@@ -61,6 +61,7 @@ mod torch;
 mod venv;
 mod download;
 pub(crate) mod git;
+mod git_portable;
 mod comfy_job;
 mod comfy_install;
 mod comfy_pin;
@@ -82,6 +83,7 @@ pub(crate) use self::{
     torch::*,
     venv::*,
     git::*,
+    git_portable::*,
     comfy_job::*,
     comfy_install::*,
     comfy_repair::*,
@@ -116,6 +118,7 @@ mod tests {
         ("download.rs", include_str!("download.rs")),
         ("env_check.rs", include_str!("env_check.rs")),
         ("git.rs", include_str!("git.rs")),
+        ("git_portable.rs", include_str!("git_portable.rs")),
         ("lmstudio.rs", include_str!("lmstudio.rs")),
         ("lu_node_packs.rs", include_str!("lu_node_packs.rs")),
         ("lmstudio_install.rs", include_str!("lmstudio_install.rs")),

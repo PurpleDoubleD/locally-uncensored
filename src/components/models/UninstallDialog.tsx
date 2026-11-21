@@ -7,6 +7,7 @@
  * space that is freed. Only "Uninstall" deletes, and only the files in the
  * list marked to go. "Move to Trash" keeps a way back.
  */
+import { getRetiredBundles } from '../../api/model-bundles'
 import { useEffect, useState } from 'react'
 import { Loader2, Trash2 } from 'lucide-react'
 import { Modal } from '../ui/Modal'
@@ -41,7 +42,9 @@ interface Props {
 }
 
 function allBundles(): ModelBundle[] {
-  return [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles()]
+  // The retired H3 records too: one H3 model must not take the encoder the
+  // other one on disk still uses.
+  return [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles(), ...getRetiredBundles()]
 }
 
 /** What the disk says about each file of the given bundles. */

@@ -278,7 +278,7 @@ encoding_rs = { version = "0.8", optional = true }
 # Which app a window belongs to, for computer use. Both are already in
 # Cargo.lock through tauri and xcap (MIT). libc, which computer use also names
 # on macOS, is declared once for every unix below, with its exact pin.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSRunningApplication", "libc", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSSpellChecker"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSRunningApplication", "libc", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSSpellChecker", "NSScreen"] }
 # The LU browser (commands/browser.rs, P-L 3.1.0): read a page in our own
 # JavaScript world and take its picture. Both crates are in Cargo.lock already
 # through wry, same versions; named here only for the WKWebView calls Tauri

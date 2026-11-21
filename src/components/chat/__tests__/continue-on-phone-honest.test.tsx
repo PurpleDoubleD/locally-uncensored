@@ -17,13 +17,12 @@ afterEach(() => {
 })
 
 describe('Continue on phone says which phone shows a shared chat', () => {
-  it('the button names the next phone app, shared or not', () => {
+  it('the button keeps a short tooltip, the detail stays in the settings list', () => {
     const id = useChatStore.getState().createConversation('qwen', '')
     render(<ContinueOnPhoneButton />)
-    expect(screen.getByTestId('continue-on-phone').getAttribute('title')).toMatch(/LU phone app \(3\.0\.10 or newer\)/)
-    expect(screen.getByTestId('continue-on-phone').getAttribute('title')).toMatch(/browser remote/)
+    expect(screen.getByTestId('continue-on-phone').getAttribute('title')).toBe('Set up your phone')
     act(() => useChatStore.getState().setRemoteShared(id, true))
-    expect(screen.getByTestId('continue-on-phone').getAttribute('title')).toMatch(/^Shared with your phone\. .*LU phone app \(3\.0\.10 or newer\)/)
+    expect(screen.getByTestId('continue-on-phone').getAttribute('title')).toBe('Stop sharing with phone')
   })
 
   it('the list of shared chats says it once, with what reaches the phone until then', () => {

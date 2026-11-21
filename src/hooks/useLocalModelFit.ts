@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useGraphicsCardGb } from './useGraphicsMemory'
 import { readModelDiskSizes, type ClassifiedModel } from '../api/comfyui'
 import {
-  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles,
+  getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles, getRetiredBundles,
 } from '../api/model-bundles'
 import { needForInstalledFile, vramFit, fileVramFit, type VramFit } from '../lib/vram-fit'
 
@@ -21,7 +21,7 @@ const GIB = 1_073_741_824
 let catalogue: ReturnType<typeof getImageBundles> | null = null
 function allBundles() {
   catalogue ??= [
-    ...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles(),
+    ...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles(), ...getRetiredBundles(),
   ]
   return catalogue
 }

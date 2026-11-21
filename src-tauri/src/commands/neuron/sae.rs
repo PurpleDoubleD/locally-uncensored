@@ -298,7 +298,7 @@ mod tests {
     use super::*;
 
     fn facts(arch: &str, n_embd: usize, n_layer: usize) -> ModelFacts {
-        ModelFacts { arch: arch.into(), n_layer, n_embd, template: super::super::model::Template::Gemma, name: "x".into(), tweaked: Vec::new(), original: None }
+        ModelFacts { arch: arch.into(), n_layer, n_embd, template: super::super::model::Template::Gemma, name: "x".into(), tweaked: Vec::new(), origin: Default::default() }
     }
 
     #[test]

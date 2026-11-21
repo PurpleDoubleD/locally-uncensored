@@ -21,7 +21,7 @@
 use crate::commands::engine::{model_shape, plan_request, server_args, EngineTuning};
 use crate::commands::vram_plan::{decide, parse_engine_report, Budget, Calibration, Card, Host, ImagePart, MIB};
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 fn mib(b: u64) -> u64 {
@@ -83,13 +83,13 @@ fn live_plan_against_the_real_engine() {
                 reading.as_ref().map(|r| Card::Measured(Budget { bytes: r.bytes, free: r.free, learned_overhead: 0 })).unwrap_or(Card::None)
             };
             let d = decide(&shape, &plan_request(&tuning), card, host, ImagePart::from_head(part_bytes, part_head.as_ref()), Calibration::default());
-            let planned = EngineTuning { ctx: d.ctx, plan_cpu_moe: d.cpu_moe, plan_cache_ram_mib: d.cache_ram_mib, ..tuning.clone() };
+            let planned = EngineTuning { ctx: d.ctx, plan_cpu_moe: d.cpu_moe, plan_cpu_ffn: d.cpu_ffn, plan_cache_ram_mib: d.cache_ram_mib, ..tuning.clone() };
             let mmproj = if d.with_image_part { part.as_deref() } else { None };
             let args = server_args(model, &planned, port, None, mmproj, d.ngl, windows);
             let ram_before = available_ram();
             let free_before = reading.as_ref().filter(|r| r.free).map(|r| r.bytes);
 
-            let mut cmd = Command::new(&engine);
+            let mut cmd = crate::process_util::hidden_command(&engine);
             cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
             if let Some(dir) = &engine_dir {
                 cmd.current_dir(dir);
@@ -128,6 +128,7 @@ fn live_plan_against_the_real_engine() {
                 "loadSeconds": started.elapsed().as_secs(),
                 "ngl": d.ngl,
                 "cpuMoe": d.cpu_moe,
+                "cpuFfn": d.cpu_ffn,
                 "imagePart": mmproj.is_some(),
                 "freeBeforeMiB": free_before.map(mib),
                 "plan": {

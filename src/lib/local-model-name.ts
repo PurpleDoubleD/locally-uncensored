@@ -11,7 +11,7 @@
  * reachable as the row's tooltip and in the search. A file the catalogue does
  * not know (a CivitAI download, the user's own) keeps its file name.
  */
-import { getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles } from '../api/model-bundles'
+import { getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, getUpscaleBundles, getRetiredBundles } from '../api/model-bundles'
 
 let names: Map<string, string> | null = null
 
@@ -23,7 +23,7 @@ function baseName(filename: string): string {
 export function catalogModelName(filename: string): string | null {
   if (!names) {
     names = new Map()
-    const bundles = [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles()]
+    const bundles = [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles(), ...getUpscaleBundles(), ...getRetiredBundles()]
     for (const b of bundles) {
       for (const f of b.files) {
         if (f.filename && f.name && !names.has(baseName(f.filename))) names.set(baseName(f.filename), f.name)

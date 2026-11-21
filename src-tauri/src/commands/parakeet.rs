@@ -19,7 +19,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -386,7 +386,7 @@ fn live() -> Option<(u16, String)> {
 fn spawn(exe: &Path, model: &Path) -> Result<(u16, String), String> {
     let port = free_port()?;
     let key = uuid::Uuid::new_v4().simple().to_string();
-    let mut cmd = Command::new(exe);
+    let mut cmd = crate::process_util::hidden_command(exe);
     cmd.args(serve_args(model, port, &key))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

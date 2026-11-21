@@ -950,32 +950,118 @@ export interface ModelBundle {
   verified?: boolean      // E2E tested and confirmed working
 }
 
-// The three files MiniMax H3 and FastH3 share: the text encoder and both
-// autoencoders. One definition, so an install of either bundle satisfies the
-// other and the two can never drift apart.
-const H3_SHARED_FILES: DiscoverModel[] = [
+/**
+ * MiniMax H3 and FastH3, no longer offered (lib/retired-models.ts). Their
+ * licenses exclude the EU, the UK, South Korea and the USA. These records
+ * carry no address on purpose: nothing can fetch them and no list of models
+ * to get shows them. They stay so that a user who has the files keeps what
+ * the catalog knew about them: the name in the picker, the memory verdict,
+ * the family of the turbo LoRA, the size that tells a half download, and
+ * which files two models share when one of them is uninstalled.
+ */
+const RETIRED_H3_SHARED_FILES: DiscoverModel[] = [
     {
       name: 'Qwen3-VL 32B Text Encoder (NVFP4)',
       description: 'Required text encoder for MiniMax H3. Runs on any NVIDIA card, not only Blackwell.',
       pulls: '', tags: ['Text Encoder', '15.7 GB'], updated: 'New',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
       filename: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', subfolder: 'text_encoders', sizeGB: 15.7,
     },
     {
       name: 'MiniMax H3 Video VAE',
       description: 'Required, decodes the picture.',
       pulls: '', tags: ['VAE', '2.8 GB'], updated: 'New',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors',
       filename: 'minimax_h3_video_vae_int8_convrot.safetensors', subfolder: 'vae', sizeGB: 2.8,
     },
     {
       name: 'MiniMax H3 Audio VAE',
       description: 'Required, decodes the sound.',
       pulls: '', tags: ['VAE', '605 MB'], updated: 'New',
-      downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors',
       filename: 'minimax_h3_audio_vae_fp32.safetensors', subfolder: 'vae', sizeGB: 0.6,
     },
 ]
+
+export function getRetiredBundles(): ModelBundle[] {
+  return withVramNeed([
+    {
+      name: 'MiniMax H3 · Start/End Frames, with Sound',
+      description: 'Video with its own sound from a prompt, a start frame, or start and end frames, up to about 15 seconds.',
+      tags: ['MiniMax H3', 'Audio', '768p'],
+      verified: true,
+      totalSizeGB: 40.1,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'standard',
+      files: [
+        {
+          name: 'MiniMax H3 fl2va (int8) · Start/End frames',
+          description: 'Main model: a prompt, a start frame or start and end frames to video with sound.',
+          pulls: '', tags: ['Model', '21 GB'], updated: '',
+          filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
+        },
+        ...RETIRED_H3_SHARED_FILES,
+      ],
+    },
+    {
+      name: 'MiniMax H3 Turbo LoRA · 8 Steps',
+      description: 'Add-on for MiniMax H3: 8 steps instead of 20, from a prompt or a first frame.',
+      tags: ['MiniMax H3', 'LoRA', 'Addon'],
+      totalSizeGB: 1.82,
+      vramRequired: '24+ GB',
+      addonFor: 'MiniMax H3',
+      workflow: 'minimaxh3',
+      tier: 'standard',
+      files: [
+        {
+          name: 'MiniMax H3 Turbo LoRA (8 steps)',
+          description: 'Step distillation LoRA for the MiniMax H3 fl2va model → models/loras.',
+          pulls: '', tags: ['LoRA', '1.82 GB'], updated: '',
+          filename: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', subfolder: 'loras', sizeGB: 1.82,
+          sizeBytes: 1956193000,
+          sha256: '2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e',
+        },
+      ],
+    },
+    {
+      name: 'MiniMax H3 Reference · Reference Images, with Sound',
+      description: 'Video with its own sound from up to 9 reference pictures of who or what is in the clip. Shares its text encoder and VAEs with MiniMax H3.',
+      tags: ['MiniMax H3', 'Audio', 'References'],
+      totalSizeGB: 38.6,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'standard',
+      files: [
+        {
+          name: 'MiniMax H3 ref2va (int8) · Reference images',
+          description: 'Main model: up to 9 reference pictures to video with sound.',
+          pulls: '', tags: ['Model', '19.5 GB'], updated: '',
+          filename: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 19.53,
+          sizeBytes: 20970379616,
+          sha256: '9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779',
+        },
+        ...RETIRED_H3_SHARED_FILES,
+      ],
+    },
+    {
+      name: 'FastH3 · MiniMax H3 in 8 Steps',
+      description: 'The quick MiniMax H3: video with its own sound from a prompt in 8 steps. Text to video only. Shares its text encoder and VAEs with MiniMax H3.',
+      tags: ['FastH3', 'Audio', 'Fast'],
+      totalSizeGB: 39.7,
+      vramRequired: '24+ GB',
+      workflow: 'minimaxh3',
+      tier: 'standard',
+      files: [
+        {
+          name: 'FastH3 8 Step V2 (int8)',
+          description: 'Main model, distilled to 8 steps. Text to video with sound.',
+          pulls: '', tags: ['Model', '20.6 GB'], updated: '',
+          filename: 'fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.61,
+          sha256: '0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8',
+        },
+        ...RETIRED_H3_SHARED_FILES,
+      ],
+    },
+  ])
+}
 
 /** The catalog's LoRA add-ons: bundles that are nothing but files for
  *  models/loras (Pixel Art XL, the MiniMax H3 turbo LoRA). Models, LoRAs,
@@ -1305,127 +1391,6 @@ export function getVideoBundles(): ModelBundle[] {
           downloadUrl: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors',
           filename: 'gemma_3_12B_it_fp8_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 12.4,
         },
-      ],
-    },
-    // MiniMax H3 (Discord, throwaway 2026-09-26). The files and the int8
-    // tier are the official Comfy-Org templates' (video_minimax_h3_t2v/_i2v);
-    // sizes read from Hugging Face on 2026-10-01. The 21 GB model alone sets
-    // the VRAM line. W23 (2026-11-14): the name says what the file is for
-    // (fl2va: start and end frames), next to MiniMax H3 Reference (ref2va:
-    // reference images), so nobody has to guess which of the two to get.
-    {
-      name: 'MiniMax H3 · Start/End Frames, with Sound',
-      description: 'Video with its own sound from a prompt, a start frame, or start and end frames, up to about 15 seconds. Fastest way: add the MiniMax H3 Turbo LoRA, 8 steps instead of 20.',
-      tags: ['MiniMax H3', 'Audio', '768p'],
-      verified: true,
-      totalSizeGB: 40.1,
-      vramRequired: '24+ GB',
-      workflow: 'minimaxh3',
-      tier: 'best',
-      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
-      files: [
-        {
-          name: 'MiniMax H3 fl2va (int8) · Start/End frames',
-          description: 'Main model: a prompt, a start frame or start and end frames to video with sound.',
-          pulls: '', tags: ['Model', '21 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors',
-          filename: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 21.0,
-        },
-        ...H3_SHARED_FILES,
-      ],
-    },
-    // The 8 step turbo LoRA for MiniMax H3 (Discord 2026-10-03:
-    // "how do I get the turbo lora into the stack"). The file is the one the
-    // official templates video_minimax_h3_t2v and _i2v load with
-    // LoraLoaderModelOnly at strength 1. Free to download, read from the
-    // Hugging Face tree API and an anonymous HEAD on 2026-10-03: 1956193000
-    // bytes, and lightx2v/Minimax-h3-Turbo (the origin) states the same digest.
-    // It lands in models/loras, the LoRA stack lists it, and the H3 builder
-    // reads the 8 steps from its name.
-    {
-      name: 'MiniMax H3 Turbo LoRA · 8 Steps',
-      description: 'Add-on for MiniMax H3: 8 steps instead of 20, from a prompt or a first frame. After the download, turn it on in Create, Advanced settings, Expert, LoRA stack.',
-      tags: ['MiniMax H3', 'LoRA', 'Addon'],
-      totalSizeGB: 1.82,
-      // Sized like the model it needs next to it, for the sort and the size
-      // filters. The card itself shows no verdict for an add-on (addonFor):
-      // "Needs more than your 12 GB card" under a 1.82 GB file read as a
-      // statement about the LoRA.
-      vramRequired: '24+ GB',
-      addonFor: 'MiniMax H3',
-      workflow: 'minimaxh3',
-      tier: 'best',
-      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
-      files: [
-        {
-          name: 'MiniMax H3 Turbo LoRA (8 steps)',
-          description: 'Step distillation LoRA for the MiniMax H3 fl2va model → models/loras.',
-          pulls: '', tags: ['LoRA', '1.82 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
-          filename: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', subfolder: 'loras', sizeGB: 1.82,
-          sizeBytes: 1956193000,
-          sha256: '2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e',
-        },
-      ],
-    },
-    // MiniMax H3 Reference (W23, Discord 2026-11-12: the ref2va file was
-    // nowhere to download, though the H3 builder runs it since B38 with up to
-    // nine references, MiniMaxH3ReferenceToVideo). The file is the pruned
-    // int8 tier of the official Comfy-Org/MiniMax-H3 repo, the same tier as
-    // the fl2va bundle. Byte count and SHA-256 are the repo's LFS values, read
-    // from the Hugging Face tree API and an anonymous HEAD on 2026-11-13 (not
-    // gated). Same folder as fl2va; the encoder and the VAEs are the shared
-    // H3 files, so a machine with MiniMax H3 or FastH3 fetches only the model.
-    {
-      name: 'MiniMax H3 Reference · Reference Images, with Sound',
-      description: 'Video with its own sound from up to 9 reference pictures of who or what is in the clip. Shares its text encoder and VAEs with MiniMax H3.',
-      tags: ['MiniMax H3', 'Audio', 'References'],
-      totalSizeGB: 38.6,
-      vramRequired: '24+ GB',
-      workflow: 'minimaxh3',
-      tier: 'best',
-      url: 'https://huggingface.co/Comfy-Org/MiniMax-H3',
-      files: [
-        {
-          name: 'MiniMax H3 ref2va (int8) · Reference images',
-          description: 'Main model: up to 9 reference pictures to video with sound.',
-          pulls: '', tags: ['Model', '19.5 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors',
-          filename: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 19.53,
-          sizeBytes: 20970379616,
-          sha256: '9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779',
-        },
-        ...H3_SHARED_FILES,
-      ],
-    },
-    // FastH3 (FastVideo, 8 step distilled MiniMax H3). A full checkpoint of its
-    // own, not a LoRA: FastVideo/FastVideo-FastH3-Comfy ships the distilled
-    // weights as diffusion_models/fastvideo_fasth3_8step_v2_pruned_*.safetensors.
-    // The official Comfy-Org template (video_fastvideo_fasth3_t2v) loads it with
-    // the same Qwen3-VL encoder and the same two VAEs as MiniMax H3, so those
-    // three files are shared. Text to video only: the model card says the
-    // first/last frame and reference tasks were not distilled. Sizes and
-    // digests read from the Hugging Face tree API on 2026-10-02. Needs ComfyUI
-    // 0.35.0 or newer (BlockSparseAttention, comfy_extras/nodes_sparse_attention.py).
-    {
-      name: 'FastH3 · MiniMax H3 in 8 Steps',
-      description: 'The quick MiniMax H3: video with its own sound from a prompt in 8 steps. Text to video only. Shares its text encoder and VAEs with MiniMax H3.',
-      tags: ['FastH3', 'Audio', 'Fast'],
-      totalSizeGB: 39.7,
-      vramRequired: '24+ GB',
-      workflow: 'minimaxh3',
-      tier: 'best',
-      url: 'https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy',
-      files: [
-        {
-          name: 'FastH3 8 Step V2 (int8)',
-          description: 'Main model, distilled to 8 steps. Text to video with sound.',
-          pulls: '', tags: ['Model', '20.6 GB'], updated: 'New',
-          downloadUrl: 'https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy/resolve/main/diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors',
-          filename: 'fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors', subfolder: 'diffusion_models', sizeGB: 20.61,
-          sha256: '0922785978dc9bfe1adf27d8b291b0ca763f9f165f882e6cb297c72fbb6deda8',
-        },
-        ...H3_SHARED_FILES,
       ],
     },
     // LTX 2.5 (Lightricks, open weights since 11.08.2026). Every file is the one

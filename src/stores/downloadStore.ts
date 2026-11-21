@@ -1,3 +1,4 @@
+import { isRetiredModelName } from '../lib/retired-models'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
@@ -505,6 +506,9 @@ export const useDownloadStore = create<DownloadStoreState>()(persist((set, get) 
   resume: async (id: string) => {
     const meta = ensureMeta(get, id)
     if (!meta) return false
+    // A half download of MiniMax H3 from before 3.1.3 is not fetched on
+    // (lib/retired-models). It stays on disk until the user deletes it.
+    if (isRetiredModelName(id) || isRetiredModelName(meta.url)) return false
     if (meta.destDir) {
       // A file that was downloaded by path (every GGUF of the built-in engine,
       // a chat model, its image part) has no ComfyUI subfolder, and

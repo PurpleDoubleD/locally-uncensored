@@ -503,6 +503,8 @@ export async function backendCall<T = unknown>(
     set_comfyui_path: { path: "/local-api/set-comfyui-path", method: "POST" },
     install_comfyui: { path: "/local-api/install-comfyui", method: "POST" },
     install_comfyui_status: { path: "/local-api/install-comfyui" },
+    install_git: { path: "/local-api/install-git", method: "POST" },
+    install_git_status: { path: "/local-api/install-git-status" },
     install_ollama: { path: "/local-api/install-ollama", method: "POST" },
     install_ollama_status: { path: "/local-api/install-ollama-status" },
     set_comfyui_port: { path: "/local-api/set-comfyui-port", method: "POST" },

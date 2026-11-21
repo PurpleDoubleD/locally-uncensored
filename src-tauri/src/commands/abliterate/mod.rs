@@ -1093,7 +1093,7 @@ fn run_job(app: &tauri::AppHandle, job: &Job) -> Result<RunRecord, String> {
     check_cancel()?;
     if let (Some(q), Some(bin)) = (quantize_to, &job.quantize) {
         set_phase("quantize", &format!("Quantizing to {q}"));
-        let mut cmd = Command::new(bin);
+        let mut cmd = crate::process_util::hidden_command(bin);
         cmd.arg(&converted).arg(&partial).arg(q);
         run_python(cmd, "quantize", |_| {})?;
         let _ = std::fs::remove_file(&converted);

@@ -25,10 +25,10 @@ const mainFile = (b: ModelBundle) =>
 const tierOfFile = (name: string) => localTier({ name, type: classifyModel(name) })
 
 describe('jedes lokale Bundle traegt eine Stufe', () => {
-  it('alle 47 Bundles haben best, standard oder older', () => {
+  it('alle 43 Bundles haben best, standard oder older', () => {
     // B18 (3.0.9): Wan 2.2 A14B I2V und T2V Fast, Wan 2.1 Speed-LoRAs.
-    // W23 (3.1.0): MiniMax H3 Reference.
-    expect(ALL.length).toBe(47)
+    // W23 (3.1.0): MiniMax H3 Reference. 3.1.3: die vier H3-Eintraege raus (Lizenz).
+    expect(ALL.length).toBe(43)
     for (const b of ALL) expect(['best', 'standard', 'older'], b.name).toContain(b.tier)
   })
 
@@ -51,8 +51,6 @@ describe('jedes lokale Bundle traegt eine Stufe', () => {
 describe('welche Familie wohin gehoert', () => {
   const best = [
     ['LTX 2.5', 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors'],
-    ['MiniMax H3', 'minimax_h3_fl2va_pruned_int8_convrot.safetensors'],
-    ['FastH3', 'fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors'],
     ['Qwen-Image 2.1', 'qwen_image_2.1_int8_convrot.safetensors'],
     ['Z-Image Turbo', 'z_image_turbo_bf16.safetensors'],
     ['Z-Image Base', 'z_image_bf16.safetensors'],
@@ -63,6 +61,9 @@ describe('welche Familie wohin gehoert', () => {
     ['ACE Step 1.5 Turbo', 'ace_step_1.5_turbo_aio.safetensors'],
   ]
   const standard = [
+    // 3.1.3: no longer offered, so no "Best" mark on a file someone still has.
+    ['MiniMax H3', 'minimax_h3_fl2va_pruned_int8_convrot.safetensors'],
+    ['FastH3', 'fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors'],
     ['Wan 2.2 TI2V 5B', 'wan2.2_ti2v_5B_fp16.safetensors'],
     ['Wan 2.2 Rapid AIO', 'wan2.2-i2v-rapid-aio-v10-nsfw-Q4_K_M.gguf'],
     ['Wan 2.2 S2V', 'wan2.2_s2v_14B_fp8_scaled.safetensors'],

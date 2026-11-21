@@ -938,6 +938,11 @@ export const SETTINGS_STRINGS = {
     // The row leaves the app, so it says where to, like the three rows around it (second check on Android, F3).
     sourceOpens: 'Opens github.com in your browser',
     updates: 'Updates come through the store you installed LU from.',
+    updatesOpen: 'LU asks GitHub once a day for the newest version number. Nothing about you is sent. Install a new APK over this one and your chats and settings stay.',
+    updateTo: (version: string) => `Update to ${version}`,
+    updateSub: 'Opens the official download in your browser',
+    updateGet: 'Get it',
+    updateFailed: 'The download could not be opened.',
     license: 'LU is free software under the GNU Affero General Public License, version 3.',
     contactGroup: 'Contact',
     contact: 'Contact support',

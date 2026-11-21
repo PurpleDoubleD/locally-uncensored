@@ -14,7 +14,7 @@
 import { useMemo } from 'react'
 import { useCreateStore } from '../../../stores/createStore'
 import { classifyModel } from '../../../api/comfyui'
-import { getVideoBundles } from '../../../api/model-bundles'
+import { getRetiredBundles, getVideoBundles } from '../../../api/model-bundles'
 import { useGraphicsCardGb } from '../../../hooks/useGraphicsMemory'
 import { hasWanFastMode, type VideoSpeed } from '../../../lib/wan-speed'
 import { MAX_LONG_SECONDS, planLongVideo, sectionSpec, secondsOf, type LongVideoMode } from '../../../lib/long-video'
@@ -28,7 +28,7 @@ let weightTable: Map<string, number> | null = null
 function weightGbOf(model: string): number | null {
   if (!weightTable) {
     weightTable = new Map()
-    for (const b of getVideoBundles()) {
+    for (const b of [...getVideoBundles(), ...getRetiredBundles()]) {
       for (const f of b.files) if (f.filename && f.sizeGB && f.subfolder === 'diffusion_models') weightTable.set(f.filename, f.sizeGB)
     }
   }

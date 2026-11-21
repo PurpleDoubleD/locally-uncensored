@@ -132,7 +132,7 @@ pub(super) fn parse_duration(ffmpeg_says: &str) -> Option<f64> {
 /// The length of an audio file in seconds, read with the ffmpeg the engine
 /// writes its videos with. `None` when it cannot be read.
 pub(super) fn audio_seconds(audio: &Path) -> Option<f64> {
-    let out = Command::new(ffmpeg_dir(&venv_dir()).join("ffmpeg"))
+    let out = crate::process_util::hidden_command(ffmpeg_dir(&venv_dir()).join("ffmpeg"))
         .arg("-hide_banner")
         .arg("-i")
         .arg(audio.as_os_str())

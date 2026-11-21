@@ -252,7 +252,7 @@ fn capture_screen_to(tmp: &std::path::Path) -> Result<(), String> {
     // session or a stalled GDI call, and an agent run must not stand still
     // for it either. stderr is dropped in exchange for the bound; the
     // actionable half was always the exit status.
-    let mut cmd = std::process::Command::new("powershell");
+    let mut cmd = crate::process_util::hidden_command("powershell");
     cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
         .creation_flags(0x08000000); // CREATE_NO_WINDOW
     run_capture_bounded(
@@ -273,7 +273,7 @@ fn capture_screen_to(tmp: &std::path::Path) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn capture_screen_to(tmp: &std::path::Path) -> Result<(), String> {
     const PERMISSION_HINT: &str = "grant LU the Screen Recording permission in System Settings ▸ Privacy & Security ▸ Screen Recording, then try again.";
-    let mut cmd = std::process::Command::new("/usr/sbin/screencapture");
+    let mut cmd = crate::process_util::hidden_command("/usr/sbin/screencapture");
     cmd.args(["-x", "-t", "png"]).arg(tmp);
     // A timeout here almost always means the consent dialog is up and nobody
     // has answered it, so say that rather than blaming the capture.

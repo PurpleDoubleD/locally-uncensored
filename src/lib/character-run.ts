@@ -85,7 +85,7 @@ export function characterRunPlan(input: CharacterRunInput): CharacterRunPlan {
   if (input.intent === 'video' && input.videoModel && !canRunVideoIntent(input.videoModel, 'animate')) {
     return {
       kind: 'error',
-      message: `${input.videoModel} makes video from text only and cannot start from your character. Pick a model that takes a start image (Wan 2.2, LTX, MiniMax H3) or remove the character.`,
+      message: `${input.videoModel} makes video from text only and cannot start from your character. Pick a model that takes a start image (Wan 2.2, LTX) or remove the character.`,
     }
   }
   return { kind: 'chain', file }

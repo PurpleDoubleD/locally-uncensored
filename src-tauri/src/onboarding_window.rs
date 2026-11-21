@@ -213,7 +213,9 @@ pub fn reveal_decision(label: &str, onboarding_done: bool, onboarding_window_exi
 pub fn reveal(window: &WebviewWindow) {
     let app = window.app_handle();
     let onboarding = app.get_webview_window(ONBOARDING);
-    match reveal_decision(window.label(), is_onboarding_done(), onboarding.is_some()) {
+    let decision = reveal_decision(window.label(), is_onboarding_done(), onboarding.is_some());
+    place_main(window, decision, onboarding.as_ref());
+    match decision {
         Reveal::KeepHidden => {
             tracing::info!("main window stays hidden: the onboarding runs in its own window");
         }
@@ -244,6 +246,22 @@ pub fn reveal(window: &WebviewWindow) {
                 let _ = o.destroy();
             }
         }
+    }
+}
+
+/// 3.1.3: before the main window shows for the first time, it goes to its
+/// place (`window_place`): after the onboarding centred on the onboarding's
+/// monitor, at a start where the user left it.
+#[cfg(desktop)]
+fn place_main(window: &WebviewWindow, decision: Reveal, onboarding: Option<&WebviewWindow>) {
+    if window.label() != MAIN || decision == Reveal::KeepHidden {
+        return;
+    }
+    match (decision, onboarding) {
+        (Reveal::ShowAndCloseOnboarding, Some(o)) => {
+            crate::window_place::place_once(window, crate::window_place::Moment::AfterOnboarding, o.current_monitor().ok().flatten())
+        }
+        _ => crate::window_place::place_once(window, crate::window_place::Moment::Start, None),
     }
 }
 
@@ -461,6 +479,9 @@ pub fn front_window(app: &AppHandle) -> Option<WebviewWindow> {
 #[cfg(desktop)]
 pub fn bring_to_front(app: &AppHandle) {
     if let Some(window) = front_window(app) {
+        if window.label() == MAIN {
+            crate::window_place::place_once(&window, crate::window_place::Moment::Start, None);
+        }
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();

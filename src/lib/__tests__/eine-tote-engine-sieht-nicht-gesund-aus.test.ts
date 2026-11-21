@@ -91,7 +91,8 @@ describe('A3: die Kachel des toten Modells', () => {
 
   it('der Zustand kommt aus derselben Schleife wie der Punkt', () => {
     const seite = lies('components/models/ModelManager.tsx')
-    expect(seite).toContain('const engineRuht = engineIsIdle(useBuiltinEngineStatus())')
+    expect(seite).toContain('const engineView = useBuiltinEngineStatus()')
+    expect(seite).toContain('const engineRuht = engineIsIdle(engineView)')
     expect(seite).toContain('engineStopped={engineRuht}')
   })
 })

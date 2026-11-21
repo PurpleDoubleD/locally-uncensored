@@ -702,8 +702,8 @@ const NOTE_313: ReleaseNote = {
       detail: 'Memories are no longer cut at 500 characters. The brain icon shows what the last request sent, and you can pin a memory, give memories their own token budget or switch them off for one chat.',
     },
     {
-      title: 'MiniMax H3 Image runs on LU\'s own workflow.',
-      detail: 'Your prompt, size, number of pictures and reference pictures go in, and Edit works with it.',
+      title: 'MiniMax H3 is no longer a download.',
+      detail: 'Its license leaves out the EU, the UK, South Korea and the USA, so LU no longer offers MiniMax H3 and FastH3. Files you already have stay and keep working, and MiniMax H3 Image now runs on LU\'s own workflow with them.',
     },
   ],
   details: [

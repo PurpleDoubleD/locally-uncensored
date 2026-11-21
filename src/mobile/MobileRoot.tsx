@@ -8,6 +8,7 @@
  * desktop has and a phone has not is simply absent: backend detection,
  * the onboarding window, shortcuts, title bar.
  */
+import { useUpdateAtStart } from './screens/settings/parts/UpdateRow'
 import { Component, useEffect, useSyncExternalStore, type ErrorInfo, type ReactNode } from 'react'
 import { MotionConfig } from 'framer-motion'
 import { LucideProvider } from 'lucide-react'
@@ -73,6 +74,8 @@ function AppServices() {
   useModeFollow()
   // Strand 5: the watch for a session that ended unasked (G6) and the notes of a new version (E21).
   useSettingsServices()
+  // The open Android package has no store that tells it about a new version (lib/app-update.ts).
+  useUpdateAtStart()
 
   useEffect(() => {
     // The models of the built in engine. No other local backend is asked.

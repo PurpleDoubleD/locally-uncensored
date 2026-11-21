@@ -80,7 +80,7 @@ pub(crate) fn ensure_runtime() {
             if ask_yes_no(&missing_text(&offer)) {
                 // Not silent on purpose: the user just said yes and should
                 // see Microsoft's progress, not a frozen nothing.
-                let status = std::process::Command::new(setup).arg("/install").status();
+                let status = crate::process_util::hidden_command(setup).arg("/install").status();
                 tracing::info!(?status, "WebView2 bootstrapper finished");
                 if tauri::webview_version().is_ok() {
                     return;
@@ -90,7 +90,7 @@ pub(crate) fn ensure_runtime() {
         }
         Offer::DownloadPage => tell(&missing_text(&offer)),
     }
-    let _ = std::process::Command::new("explorer").arg(DOWNLOAD_PAGE).spawn();
+    let _ = crate::process_util::hidden_command("explorer").arg(DOWNLOAD_PAGE).spawn();
     std::process::exit(1);
 }
 

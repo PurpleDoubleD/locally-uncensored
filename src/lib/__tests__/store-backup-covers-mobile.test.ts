@@ -44,7 +44,10 @@ function persistNames(source: string): string[] {
  * Persisted under src/mobile and left out on purpose. Each needs a reason:
  * a key that is merely forgotten belongs in STORE_KEYS.
  */
-const LEFT_OUT: Record<string, string> = {}
+const LEFT_OUT: Record<string, string> = {
+  // A day-old answer about the newest version. A restore must not bring back an old one.
+  'lu-mobile-app-update': 'cache of the update check, asked again within a day',
+}
 
 describe('the backup covers what the phone shell persists', () => {
   it('lists every persist name declared under src/mobile', async () => {

@@ -125,6 +125,10 @@ pub struct EngineTuning {
     /// `--n-cpu-moe`, the MoE layers whose experts stay on the processor.
     #[serde(skip)]
     pub plan_cpu_moe: u32,
+    /// Set by the VRAM plan: `--n-cpu-ffn`, the dense layers whose FFN weights
+    /// stay on the processor.
+    #[serde(skip)]
+    pub plan_cpu_ffn: u32,
     /// Set by the VRAM plan: `--cache-ram` in MiB when RAM is tight.
     #[serde(skip)]
     pub plan_cache_ram_mib: Option<u64>,
@@ -149,6 +153,7 @@ impl Default for EngineTuning {
             no_mmap: false,
             ctx_chosen: false,
             plan_cpu_moe: 0,
+            plan_cpu_ffn: 0,
             plan_cache_ram_mib: None,
             control_vector: None,
         }
@@ -750,7 +755,7 @@ pub(crate) fn gpu_layers_reported(args: &[String]) -> Option<u32> {
 /// The argv with the `-ngl <n>` pair removed, for the idempotence check, and
 /// with what else the VRAM plan measured (`--n-cpu-moe`, `--cache-ram`).
 pub(crate) fn argv_without_gpu_layers(args: &[String]) -> Vec<String> {
-    argv_without(args, &["-ngl", "--n-cpu-moe", "--cache-ram"])
+    argv_without(args, &["-ngl", "--n-cpu-moe", "--n-cpu-ffn", "--cache-ram"])
 }
 
 /// The argv with these flags and their values removed.
@@ -773,6 +778,11 @@ pub(crate) fn cpu_moe_in(args: &[String]) -> u32 {
     args.windows(2).find(|w| w[0] == "--n-cpu-moe").and_then(|w| w[1].parse().ok()).unwrap_or(0)
 }
 
+/// `--n-cpu-ffn` in a finished argv, 0 when it carries none.
+pub(crate) fn cpu_ffn_in(args: &[String]) -> u32 {
+    args.windows(2).find(|w| w[0] == "--n-cpu-ffn").and_then(|w| w[1].parse().ok()).unwrap_or(0)
+}
+
 /// `--ctx-size` in a finished argv.
 fn ctx_in(args: &[String]) -> Option<u32> {
     args.windows(2).find(|w| w[0] == "--ctx-size").and_then(|w| w[1].parse().ok())
@@ -789,7 +799,7 @@ pub(crate) fn same_measured_request(running: &[String], requested: &[String], ct
     if !ctx_flexible {
         return argv_without_gpu_layers(running) == argv_without_gpu_layers(requested);
     }
-    let flags = ["-ngl", "--n-cpu-moe", "--cache-ram", "--ctx-size"];
+    let flags = ["-ngl", "--n-cpu-moe", "--n-cpu-ffn", "--cache-ram", "--ctx-size"];
     let asked = ctx_in(requested).unwrap_or(u32::MAX);
     argv_without(running, &flags) == argv_without(requested, &flags)
         && (ctx_in(running).unwrap_or(0) >= asked || running_asked == Some(asked))
@@ -916,6 +926,10 @@ pub(crate) fn server_args(
     if tuning.plan_cpu_moe > 0 && ngl_on_card(&args) {
         args.push("--n-cpu-moe".into());
         args.push(tuning.plan_cpu_moe.to_string());
+    }
+    if tuning.plan_cpu_ffn > 0 && ngl_on_card(&args) {
+        args.push("--n-cpu-ffn".into());
+        args.push(tuning.plan_cpu_ffn.to_string());
     }
     if let Some(mib) = tuning.plan_cache_ram_mib {
         args.push("--cache-ram".into());
@@ -1614,7 +1628,7 @@ pub(crate) fn spawn_private_server_with(app: &AppHandle, model_path: &str, port:
     ];
     args.extend(extra.iter().cloned());
     tracing::info!(target: "engine", port, command = %command_line(&binary, &args), "starting a llama-server for a check");
-    let mut cmd = Command::new(&binary);
+    let mut cmd = crate::process_util::hidden_command(&binary);
     super::engine_key::apply(&mut cmd);
     cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let state = app.state::<AppState>();
@@ -3829,6 +3843,7 @@ fn start_after_stop(
     let planned = EngineTuning {
         ctx: decision.ctx,
         plan_cpu_moe: if engine_fits { 0 } else { decision.cpu_moe },
+        plan_cpu_ffn: if engine_fits { 0 } else { decision.cpu_ffn },
         plan_cache_ram_mib: decision.cache_ram_mib,
         ..tuning.clone()
     };
@@ -3861,6 +3876,7 @@ fn start_after_stop(
             kv = %format!("{}/{}", tuning.cache_type_k, tuning.cache_type_v),
             ngl = decision.ngl.unwrap_or(ALL_LAYERS).to_string(),
             cpu_moe = decision.cpu_moe,
+            cpu_ffn = decision.cpu_ffn,
             kv_mib = shape.cache_bytes(&request.cache.with_ctx(ctx_size)) / (1024 * 1024),
             learned_extra_mib = learned.model.extra / (1024 * 1024),
             learned_overhead_mib = learned.machine.overhead / (1024 * 1024),
@@ -4468,7 +4484,7 @@ fn spawn_engine_attempt(
         command = %command_line(binary, args),
         "starting the LU Engine llama-server"
     );
-    let mut cmd = Command::new(binary);
+    let mut cmd = crate::process_util::hidden_command(binary);
     // The key the engine answers to, in its environment (engine_key.rs).
     super::engine_key::apply(&mut cmd);
     cmd.args(args);
@@ -4739,6 +4755,7 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
                 // asked one, which nobody chose, would cost layers).
                 "ctxRequested": requested_ctx_for(&live.model_path),
                 "cpuMoe": live.cpu_moe,
+                "cpuFfn": live.cpu_ffn,
             }),
             None => serde_json::json!({
                 "running": false,
@@ -4754,6 +4771,7 @@ pub async fn bundled_engine_status(app: AppHandle) -> Result<serde_json::Value, 
                 "imageNote": null,
                 "fitActions": [],
                 "cpuMoe": 0,
+                "cpuFfn": 0,
                 "ctxRequested": null,
             }),
         };
@@ -5597,6 +5615,8 @@ pub(crate) struct LiveSidecar {
     pub image_part_bytes: u64,
     /// `--n-cpu-moe` of this process, 0 without.
     pub cpu_moe: u32,
+    /// `--n-cpu-ffn` of this process, 0 without.
+    pub cpu_ffn: u32,
 }
 
 pub(crate) fn live_sidecar(slot: &mut Option<BundledEngine>) -> Option<LiveSidecar> {
@@ -5614,6 +5634,7 @@ pub(crate) fn live_sidecar(slot: &mut Option<BundledEngine>) -> Option<LiveSidec
             .map(|m| m.len())
             .unwrap_or(0),
         cpu_moe: cpu_moe_in(&e.args),
+        cpu_ffn: cpu_ffn_in(&e.args),
     })
 }
 
@@ -5815,7 +5836,7 @@ fn start_bundled_embed_blocking(
         command = %command_line(&binary, &embed_args),
         "starting the LU Engine embeddings server"
     );
-    let mut cmd = Command::new(&binary);
+    let mut cmd = crate::process_util::hidden_command(&binary);
     super::engine_key::apply(&mut cmd);
     cmd.args(&embed_args);
     // 3.0.8 (A2): the embeddings sit next to the chat model, on its card.
@@ -5974,7 +5995,7 @@ pub(crate) fn stop_embed_locked(state: &AppState) -> bool {
 /// failure, which reads as "no device of that name" and leaves the start
 /// unpinned.
 fn list_engine_devices(binary: &Path, backend_dir: Option<&Path>) -> Vec<crate::commands::gpu_roles::LlamaDevice> {
-    let mut cmd = Command::new(binary);
+    let mut cmd = crate::process_util::hidden_command(binary);
     cmd.arg("--list-devices");
     apply_engine_backend_dir(&mut cmd, backend_dir);
     #[cfg(target_os = "windows")]
@@ -7301,6 +7322,19 @@ mod tests {
     /// The start decision for a model read the way an unreadable head is
     /// (`ModelShape::rough`: the file over its layers, 4 KiB of cache per
     /// token per layer), at a chosen context, so nothing but the layers moves.
+    #[test]
+    fn the_ffn_flag_comes_only_from_the_plan_and_only_with_layers_on_the_card() {
+        let planned = EngineTuning { plan_cpu_ffn: 9, ..Default::default() };
+        let args = build_server_args("/m.gguf", &planned, 8127, None, None, None);
+        assert_eq!(cpu_ffn_in(&args), 9);
+        let on_cpu = build_server_args("/m.gguf", &planned, 8127, None, None, Some(0));
+        assert_eq!(cpu_ffn_in(&on_cpu), 0, "no card, nothing to keep off it");
+        let read: EngineTuning = serde_json::from_str(r#"{"ctx":8192,"plan_cpu_ffn":5,"planCpuFfn":5}"#).unwrap();
+        assert_eq!(read.plan_cpu_ffn, 0, "a settings file cannot set it");
+        let plain = build_server_args("/m.gguf", &EngineTuning::default(), 8127, None, None, None);
+        assert_eq!(argv_without_gpu_layers(&args), argv_without_gpu_layers(&plain), "a new split alone is no reason to restart");
+    }
+
     fn plan_free(model: u64, blocks: Option<u32>, vram: Option<u64>, ctx: u32, free: bool) -> crate::commands::vram_plan::StartDecision {
         plan_with(model, 0, blocks, vram, ctx, free)
     }
@@ -7330,7 +7364,7 @@ mod tests {
         let shape = ModelShape::rough(model, Some(blocks));
         let usable = Budget { bytes: vram, free: true, learned_overhead: 0 }.usable();
         let cfg = CacheConfig::new(ctx, "f16", "f16", "auto");
-        let at = |n: u32| shape.split(Placement { ngl: n, cpu_moe: 0 }, &cfg, &ImagePart::default()).card.total();
+        let at = |n: u32| shape.split(Placement { ngl: n, cpu_moe: 0, cpu_ffn: 0 }, &cfg, &ImagePart::default()).card.total();
         assert!(at(ngl) <= usable, "-ngl {ngl} does not fit: {} > {}", at(ngl), usable);
         assert!(at(ngl + 1) > usable, "-ngl {} would have fit too", ngl + 1);
         ngl
@@ -7357,7 +7391,7 @@ mod tests {
         // A card with room for the model at 32K and not for its part beside it.
         let shape = ModelShape::rough(NINE_B, Some(32));
         let cfg = CacheConfig::new(32768, "f16", "f16", "auto");
-        let all = Placement { ngl: shape.all_layers(), cpu_moe: 0 };
+        let all = Placement { ngl: shape.all_layers(), cpu_moe: 0, cpu_ffn: 0 };
         let alone = shape.split(all, &cfg, &ImagePart::default()).card.total();
         let free = alone + 200 * MIB + Budget { bytes: 0, free: true, learned_overhead: 0 }.reserve();
         let p = plan_with_part(NINE_B, NINE_B_PART, Some(32), Some(free), 32768);

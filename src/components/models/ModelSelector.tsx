@@ -28,7 +28,8 @@ import { displayModelName, isOpenAISlotModel } from '../../api/providers'
 import { splitForMiddleEllipsis, modelDisplayLabel } from '../../lib/model-label'
 import { formatContextWindow } from '../../lib/formatters'
 import { lmStudioLoadContext, savedLmStudioContext } from '../../lib/lmstudio-context-pick'
-import { activateBuiltinModel, isManagedBuiltinActive } from '../../api/engine'
+import { activateBuiltinModel, isManagedBuiltinActive, stopBundledEngine } from '../../api/engine'
+import { inDesktopApp, luEngineHolds, readLuEnginePath } from '../../lib/lu-engine-loaded'
 import { diagnoseBuiltinEngine } from '../../api/builtin-ensure'
 import { canUseTools, resolveToolSupport, type ToolSupport } from '../../lib/tool-support'
 import { backendCall } from '../../api/backend'
@@ -72,7 +73,6 @@ import { ModelRowMarks } from './ModelRowMarks'
 import { CloudModelPicker, CLOUD_PICKER_MAX_HEIGHT, CLOUD_PICKER_WIDTH, type PickerNote } from './CloudModelPicker'
 import { modelFamily, OTHER_FAMILY } from '../../lib/model-family'
 import type { CloudModel as CloudModelMarks } from '../../types/models'
-import { cloudPickerLine, hostIsMac } from '../../lib/mac-pc-words'
 
 // ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
 // tail. Signed-in accounts show their real hosted chat models (the appMode
@@ -111,12 +111,25 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
   }
   return (
     <div className="mt-1 border-t border-white/[0.05]">
-      <div className="px-2.5 pt-2 pb-0.5 flex items-center gap-1">
-        <Cloud size={10} className="text-violet-500 dark:text-violet-200" />
-        <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
-          LU Cloud
-        </span>
-      </div>
+      {/* 3.1.3: with no model to list, the heading is the one way in. */}
+      {cloudChat.length === 0 ? (
+        <button
+          onClick={() => open()}
+          data-testid="picker-lu-cloud"
+          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
+          title="Runs on LU Cloud, tap to see plans"
+        >
+          <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
+          <span className="t-micro text-gray-500 dark:text-gray-400">LU Cloud</span>
+        </button>
+      ) : (
+        <div className="px-2.5 pt-2 pb-0.5 flex items-center gap-1">
+          <Cloud size={10} className="text-violet-500 dark:text-violet-200" />
+          <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
+            LU Cloud
+          </span>
+        </div>
+      )}
       {cloudChat.map((m) => (
           <button
             key={m.name}
@@ -140,19 +153,6 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
           <span className="t-micro text-gray-500">
             {cloudMore} more cloud {cloudMore === 1 ? 'model' : 'models'}, see them all
           </span>
-        </button>
-      )}
-      {cloudChat.length === 0 && (
-        <button
-          onClick={() => open()}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
-          title="Runs on LU Cloud, tap to see plans"
-        >
-          <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
-          <span className="t-micro text-gray-400">
-            {cloudPickerLine(hostIsMac())}
-          </span>
-          <span className="ml-auto text-[0.5rem] text-violet-500 dark:text-violet-200">Cloud</span>
         </button>
       )}
     </div>
@@ -932,6 +932,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   const textModelsEmptyRef = useRef(true)
   const [unloading, setUnloading] = useState(false)
   const [unloadDone, setUnloadDone] = useState(false)
+  // 3.1.3: the GGUF the LU Engine holds right now, and the row being unloaded.
+  const [luLoadedPath, setLuLoadedPath] = useState<string | null>(null)
+  const [luUnloading, setLuUnloading] = useState<string | null>(null)
   // B3, per-model LM Studio load/unload state. `lmsLoaded` is the set
   // of LM Studio model identifiers currently loaded in the server.
   // LM Studio's HTTP server doesn't have load / unload endpoints, so we
@@ -1092,6 +1095,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       } else if (!cancelled) {
         setLmsLoaded([], lmStudioGoneMark())
       }
+      void readLuEnginePath().then((path) => { if (!cancelled) setLuLoadedPath(path) })
       try {
         const loaded = await readLoadedModels()
         misses = 0
@@ -1295,6 +1299,37 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   }
 
   /**
+   * 3.1.3: the On/Off switch of an LU Engine row. Off stops the engine, which
+   * frees its memory; the pick stays, and the next chat loads it again. On is
+   * the ordinary pick, because the engine holds one model and that is the one
+   * the chat talks to.
+   */
+  const toggleLuEngineLoad = async (model: AIModel) => {
+    if (!luEngineHolds(luLoadedPath, model.name)) {
+      await handleSelectModel(model)
+      return
+    }
+    if (!tryAcquireLuEngineSwap()) {
+      announceLuEngineSwapBusy()
+      setSelectError(LU_ENGINE_SWAP_BUSY_NOTE)
+      return
+    }
+    setLuUnloading(model.name)
+    try {
+      await stopBundledEngine()
+      const after = await readLuEnginePath()
+      setLuLoadedPath(after)
+      if (after) setSelectError('The LU Engine is still running, so its model was not unloaded.')
+    } catch (e) {
+      log.warn('[picker] LU Engine unload failed', { err: e })
+      setSelectError('The LU Engine did not stop, so its model may still be loaded.')
+    } finally {
+      setLuUnloading(null)
+      releaseLuEngineSwap()
+    }
+  }
+
+  /**
    * "Unload all models". It stays available while a load is pending and ends
    * that load first: the load would bring its model in right after the unload.
    * GH #235 follow-up: it frees every engine, not only Ollama (Ollama, the LU
@@ -1321,6 +1356,7 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
       if (outcomes.some((o) => o.engine === 'lmstudio' && o.freed)) setLmsLoaded([], lmStudioGoneMark())
       const others = unloadProblems(outcomes.filter((o) => o.engine !== 'ollama' || !ollama))
       log.info('[picker] "Unload all models"', { freed: unloadedNames(outcomes) })
+      setLuLoadedPath(await readLuEnginePath())
       if (others) {
         setOllamaNote({ text: others, tone: 'error' })
       } else if (!outcomes.some((o) => o.problem)) {
@@ -1688,7 +1724,8 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
   // GH #235 follow-up: the unload button is there for every local engine, also
   // when only the LU Engine runs (a managed engine exists on the desktop only).
   const hasLmStudioRows = textModels.some((m) => isLmStudioProvider(m.providerName))
-  const showUnloadAll = hasOllamaModels || hasLmStudioRows || luEngineHoldsChat
+  // 3.1.3: also while the engine holds a model without holding the chat.
+  const showUnloadAll = hasOllamaModels || hasLmStudioRows || luEngineHoldsChat || !!luLoadedPath
   textModelsEmptyRef.current = textModels.length === 0
 
   // The one reason this picker switches rows off: a pick is already running.
@@ -2069,6 +2106,9 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                     // Local Ollama row (provider 'ollama' or legacy no-provider) →
                     // gets the on/off load toggle too. Excludes LM Studio + cloud.
                     const isOllamaRow = !isLmsRow && modelProvider === 'ollama'
+                    const isLuEngineRow = !isLmsRow && !isOllamaRow && inDesktopApp()
+                      && ((isManagedBuiltinActive() && isOpenAISlotModel(model.name))
+                        || isBuiltinEngineEntry(model as unknown as InstalledModelLike))
                     const rowId = lmsIdOf(model)
                     const isSelectingThis = selectingLms === rowId
                     // The row carries the per-LM-Studio-model power toggle, itself
@@ -2258,6 +2298,12 @@ export function ModelSelector({ openUpward = false, surface = 'chat', answeredBy
                               onClick={() => void toggleOllamaLoad(model)}
                             />
                             </>
+                          ) : isLuEngineRow ? (
+                            <LoadToggle
+                              loaded={luEngineHolds(luLoadedPath, model.name)}
+                              state={selectingLms === rowId || luUnloading === model.name ? 'busy' : pickInFlight || luUnloading ? 'off' : 'idle'}
+                              onClick={() => void toggleLuEngineLoad(model)}
+                            />
                           ) : null}
                         </div>
                       </div>

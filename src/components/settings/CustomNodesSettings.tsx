@@ -15,6 +15,8 @@ import {
 import { restartComfyForNewNodes } from '../../api/comfy-restart'
 import { useNodePackLog } from '../../hooks/useNodePackLog'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
+import { GitInstallButton } from '../ui/GitInstallButton'
+import { isGitMissing } from '../../lib/git-missing'
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -210,6 +212,9 @@ export function CustomNodesSettings() {
         </div>
       )}
       {error && <p className={`t-micro whitespace-pre-line ${HINWEIS_TEXT.fehler}`}>{error}</p>}
+      {/* 3.1.3: git is missing, so the button that gets it. The pack is
+          installed again by hand: which one was meant is the user's call. */}
+      {isGitMissing(error) && <GitInstallButton onReady={() => setError('')} />}
       {done && !busy && <p className="t-micro text-emerald-400">{done}</p>}
       {needsRestart && !busy && (
         <button onClick={restart} className={`${BTN_ACCENT} inline-flex items-center gap-1`}>

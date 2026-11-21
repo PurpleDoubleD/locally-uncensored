@@ -39,6 +39,7 @@ import { JobPanel, ScopeButton, SliderRow, TimeNote, TweakedNote, WayIntro, WayT
 import { ComparePanel, CoordinatesPanel, FeaturePanel, OwnSliderForm, SharePanel, entryState } from './panels'
 import { NeuronIntroHost } from './NeuronIntro'
 import { useNeuronIntroRequest } from '../../stores/neuronIntroStore'
+import { useOriginalOffer } from '../../hooks/useOriginalOffer'
 
 const APPLY_DELAY_MS = 700
 
@@ -317,11 +318,12 @@ export function NeuronPanel({ chrome = {} }: { chrome?: WindowChrome }) {
   const presetTimeNote = info?.buildEstimate && info.generator && presetsToPrepare && !running ? buildTimeNote(info.buildEstimate) : null
   const addEstimate = addWay === 'own' ? info?.ownEstimate : addWay === 'coords' ? info?.buildEstimate : undefined
   const addTimeNote = addEstimate && info?.generator && !running ? buildTimeNote(addEstimate) : null
-  const original = info?.facts.original ?? null
+  const original = useOriginalOffer(info?.facts.origin, !!tweak)
   const getOriginal = () => {
     if (!original) return
     useModelStore.getState().setCategoryFilter('text')
-    useUIStore.getState().openDiscoverFor('builtin', original, { original: true })
+    if (original.kind === 'exact') useUIStore.getState().openDiscoverFor('builtin', original.ggufRepo, { original: true, file: original.file })
+    else useUIStore.getState().openDiscoverFor('builtin', original.query, { original: true })
   }
 
   const presetRows = presets.map((p) => ({ p, v: vectors.find((x) => x.id === p.id) }))
@@ -368,7 +370,7 @@ export function NeuronPanel({ chrome = {} }: { chrome?: WindowChrome }) {
             />
           ) : (
             <>
-              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-4 pt-3 pb-4 space-y-4" data-testid="neuron-body">
+              <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden scrollbar-thin px-4 pt-3 pb-4 space-y-4" data-testid="neuron-body">
                 <section data-testid="neuron-step-model" aria-label="Model to steer">
                   <div className="flex items-center gap-2">
                     <label className="t-micro font-medium text-gray-500 dark:text-gray-400 shrink-0" htmlFor="neuron-model">Model</label>
@@ -393,7 +395,7 @@ export function NeuronPanel({ chrome = {} }: { chrome?: WindowChrome }) {
 
                 <section data-testid="neuron-step-sliders" aria-label="Sliders">
                   {error && <Hinweis ton="fehler" className="mb-3" onDismiss={() => setError(null)}>{error}</Hinweis>}
-                  {tweak && <TweakedNote title={tweak.title} text={tweak.text} original={tweak.original} onGetOriginal={getOriginal} />}
+                  {tweak && <TweakedNote title={tweak.title} text={tweak.text} original={original} onGetOriginal={getOriginal} />}
                   {presetTimeNote && <TimeNote title={presetTimeNote.title} text={presetTimeNote.text} />}
                   {job && job.status !== 'idle' && <JobPanel job={job} onStop={() => { setQueue([]); void neuronCancel().then(poll) }} onDismiss={() => void neuronDismiss().then(poll)} onGetOriginal={getOriginal} original={original} />}
                   {queue.length > 0 && <p className={`t-micro ${HINWEIS_TEXT.ruhig} mb-3`} data-testid="neuron-queue">{queue.length} more to prepare from the recipe, one after the other.</p>}
