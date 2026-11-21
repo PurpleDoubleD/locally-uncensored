@@ -13,12 +13,13 @@ for (const size of [{ width: 1280, height: 720 }, { width: 1100, height: 640 }])
     await page.goto('/')
     await page.getByRole('button', { name: /^Create$/ }).first().click()
     await page.getByRole('radio', { name: 'Video', exact: true }).click()
-    await page.evaluate(async (url) => {
-      const create = await import('/src/stores/createStore.ts')
-      const preview = await import('/src/stores/renderPreviewStore.ts')
+    await page.evaluate(async ({ url, createPath, previewPath }) => {
+      type Store = { setState: (next: Record<string, unknown>) => void }
+      const create = (await import(/* @vite-ignore */ createPath)) as { useCreateStore: Store }
+      const preview = (await import(/* @vite-ignore */ previewPath)) as { useRenderPreviewStore: Store }
       preview.useRenderPreviewStore.setState({ url, asked: true })
       create.useCreateStore.setState({ isGenerating: true, progressPhase: 'sampling', progress: 40, progressText: 'Sampling 4/20 12s' })
-    }, TALL_FRAME)
+    }, { url: TALL_FRAME, createPath: '/src/stores/createStore.ts', previewPath: '/src/stores/renderPreviewStore.ts' })
     const figure = page.getByTestId('render-live-preview')
     await expect(figure).toBeVisible()
     await page.waitForTimeout(300)

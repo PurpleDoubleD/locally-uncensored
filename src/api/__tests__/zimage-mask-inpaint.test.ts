@@ -64,7 +64,7 @@ describe('Z-Image with a mask', () => {
 
   it('carries the character LoRA', async () => {
     const wf = await buildDynamicWorkflow(params(), 'zimage')
-    expect(Object.values(wf).some((n) => String(n.class_type).startsWith('LoraLoader') && n.inputs.lora_name === CHAR)).toBe(true)
+    expect(Object.values(wf).some((n) => String(n.class_type).startsWith('LoraLoader') && n.inputs?.lora_name === CHAR)).toBe(true)
   })
 
   it('keeps the mask on every picture of a batch', async () => {
