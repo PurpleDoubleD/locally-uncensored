@@ -58,9 +58,10 @@ import { PhoneWritesLine } from './PhoneWritesLine'
 import { SlashStepsBlock } from './SlashStepsBlock'
 import { CompactBlock } from './CompactBlock'
 import { CompactLayerBanner, CompactLayerRail, useCompactLayers } from './CompactLayerRail'
-import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, FolderX, Check, AlertTriangle } from 'lucide-react'
+import { User, Code, Eye, GitBranch, RefreshCw, RotateCcw, Folder, FolderX, Check, AlertTriangle } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
+import { checkGitInstalled, type GitStatus } from '../../api/backend'
+import { GitInstallButton } from '../ui/GitInstallButton'
 import { CodexConfirmDialog } from './CodexConfirmDialog'
 import { Hinweis } from '../ui/Hinweis'
 import { HINWEIS_TEXT } from '../../lib/hinweis'
@@ -377,8 +378,8 @@ export function CodexView() {
 
         {/* Git-missing banner (v2.5.0). Codex shells out to git for
             status/diff/commit/log, and without it those tools fail. Minimal,
-            dismiss-by-installing: an Install button (opens the platform git
-            download page) + a Recheck button for after the install.
+            dismiss-by-installing: an Install Git button (GitInstallButton)
+            + a Recheck button for after the install.
             Ton `fehler`: ohne git fallen echte Werkzeuge aus, und es gibt genau
             eine Handlung dagegen, die gleich daneben steht. Die gelbe Fuellung
             und der gelbe Rahmen sind weg, die Linie unten ist die Trennung zum
@@ -389,12 +390,9 @@ export function CodexView() {
             <Hinweis ton="fehler" icon={<GitBranch size={12} className="shrink-0 mt-0.5" />} className="flex-1">
               Git isn't installed. The coding agent needs it for diffs, commits and history.
             </Hinweis>
-            <button
-              onClick={() => openExternal(gitStatus.download_url)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded t-micro font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
-            >
-              <Download size={11} /> Install Git
-            </button>
+            {/* 3.1.3: the button gets Git itself (MinGit on Windows, the
+                Command Line Tools on a Mac, the package command on Linux). */}
+            <GitInstallButton onReady={recheckGit} />
             <button
               onClick={recheckGit}
               disabled={gitChecking}

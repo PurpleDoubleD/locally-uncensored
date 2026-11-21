@@ -101,9 +101,9 @@ pub fn windows_git_install_hint(state: &WindowsGitState) -> Option<String> {
     match state {
         WindowsGitState::Native => None,
         WindowsGitState::Missing => Some(
-            "Git is not installed or not on PATH. Install Git for Windows from \
-             https://git-scm.com/download/win (or run `winget install Git.Git` in a \
-             terminal) and restart LU so the new PATH is picked up.".to_string(),
+            "Git is not installed. Press Install Git and LU sets up its own Git \
+             (about 40 MB, no admin rights needed). Or install Git for Windows from \
+             https://git-scm.com/download/win and restart LU.".to_string(),
         ),
         WindowsGitState::NonNative => Some(
             "A non-native `git` binary is first on PATH (likely WSL or a Linux \
@@ -135,7 +135,7 @@ pub struct GitStatus {
 
 /// Run `git --version` (no console window on Windows) and return the trimmed
 /// stdout line, or `None` if git is missing / failed to run.
-fn git_version_string() -> Option<String> {
+pub(crate) fn git_version_string() -> Option<String> {
     let mut cmd = foreign_system_command("git");
     cmd.arg("--version");
     #[cfg(target_os = "windows")]
@@ -260,6 +260,20 @@ pub fn linux_git_missing_message(os_release: &str) -> String {
     }
 }
 
+/// Pure: the one command that installs git on this distro, for "Install
+/// Git" to show and copy (3.1.3). `None` when the distro is not known; the
+/// message above then names all four.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn linux_git_command(os_release: &str) -> Option<&'static str> {
+    match linux_package_manager_from_os_release(os_release) {
+        LinuxPackageManager::Apt => Some("sudo apt install git"),
+        LinuxPackageManager::Dnf => Some("sudo dnf install git"),
+        LinuxPackageManager::Pacman => Some("sudo pacman -S git"),
+        LinuxPackageManager::Zypper => Some("sudo zypper install git"),
+        LinuxPackageManager::Unknown => None,
+    }
+}
+
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn read_os_release() -> String {
     std::fs::read_to_string("/etc/os-release").unwrap_or_default()
@@ -297,15 +311,28 @@ fn git_download_preflight_core(is_git_present: bool, os_release: &str) -> Option
 /// of a message that names the exact command to run.
 ///
 /// Windows keeps its own `windows_git_probe`/`windows_git_install_hint`
-/// pair (unchanged, called separately at each site) and macOS keeps the
-/// existing spawn-error fallback (unchanged); this returns `None` on both
-/// so callers see no behaviour change there.
+/// pair (called separately at each site), so this returns `None` there.
+/// macOS asks too since 3.1.3 (see below), so "Install Git" can show.
 #[cfg(target_os = "linux")]
 pub fn git_download_preflight() -> Option<String> {
     git_download_preflight_core(is_git_present(), &read_os_release())
 }
 
-#[cfg(not(target_os = "linux"))]
+/// macOS (3.1.3): without the Command Line Tools `/usr/bin/git` is only a
+/// stub that fails, and the clone used to die on its "invalid active
+/// developer path". Same sentence head as the other systems, so the
+/// interface offers "Install Git" in the same place.
+#[cfg(target_os = "macos")]
+pub fn git_download_preflight() -> Option<String> {
+    (!is_git_present()).then(|| MAC_GIT_MISSING.to_string())
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const MAC_GIT_MISSING: &str = "Git is not installed. Press Install Git: macOS then installs its \
+     Command Line Tools, which include Git.";
+
+/// Windows keeps its own probe at each call site (`windows_git_probe`).
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn git_download_preflight() -> Option<String> {
     None
 }
@@ -448,6 +475,27 @@ mod tests {
     fn git_hint_native_returns_none() {
         // Native git → no hint needed, install proceeds silently.
         assert!(windows_git_install_hint(&WindowsGitState::Native).is_none());
+    }
+
+    #[test]
+    fn every_git_missing_sentence_starts_the_same_so_the_button_shows() {
+        // src/lib/git-missing.ts finds the sentence by this head.
+        let head = "Git is not installed";
+        assert!(windows_git_install_hint(&WindowsGitState::Missing).unwrap().starts_with(head));
+        assert!(MAC_GIT_MISSING.starts_with(head));
+        for os in ["ID=debian", "ID=fedora", "ID=arch", "ID=opensuse", "ID=plan9"] {
+            assert!(linux_git_missing_message(os).starts_with(head), "{os}");
+        }
+        assert!(windows_git_install_hint(&WindowsGitState::Missing).unwrap().contains("Install Git"));
+    }
+
+    #[test]
+    fn the_linux_command_to_copy_fits_the_distro() {
+        assert_eq!(linux_git_command("ID=ubuntu\nID_LIKE=debian"), Some("sudo apt install git"));
+        assert_eq!(linux_git_command("ID=fedora"), Some("sudo dnf install git"));
+        assert_eq!(linux_git_command("ID=manjaro\nID_LIKE=arch"), Some("sudo pacman -S git"));
+        assert_eq!(linux_git_command("ID=opensuse-tumbleweed"), Some("sudo zypper install git"));
+        assert_eq!(linux_git_command("ID=plan9"), None);
     }
 
     #[test]

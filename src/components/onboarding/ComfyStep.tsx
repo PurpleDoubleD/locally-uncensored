@@ -37,6 +37,8 @@ import type { OnboardingSkin } from './onboarding-skin'
 import type { InstallerFleet } from './use-installer-fleet'
 import { SeparateComfyInstall, COMFY_PATH_CONNECT_HINT } from '../settings/SeparateComfyInstall'
 import { OnboardingCloudHint } from '../cloud/OnboardingCloudHint'
+import { GitInstallButton } from '../ui/GitInstallButton'
+import { isGitMissing } from '../../lib/git-missing'
 
 interface ComfyStepProps {
   skin: OnboardingSkin
@@ -250,9 +252,13 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
   // Installation nicht durchlaeuft und jemand Platz schaffen muss.
   const diskPressure = comfyInstall.logs.find(l => l.startsWith('⚠'))?.replace(/^⚠\s*/, '')
 
+  /** Where the last install went, so "Install Git" can start it again there. */
+  const lastInstallPath = useRef<string | undefined>(undefined)
+
   /** The install, with its Python pre-flight and its progress card. C80: an
    *  `installPath` puts a separate ComfyUI there instead of the default. */
   const startComfyInstall = async (installPath?: string) => {
+    lastInstallPath.current = installPath
     // P14 pre-flight, install Python first if missing,
     // then proceed with the original ComfyUI flow. Both
     // progress cards animate from this single click; the
@@ -639,6 +645,11 @@ export function ComfyStep({ skin, fleet, step, setStep }: ComfyStepProps) {
       {/* Error */}
       {comfyInstall.error && (
         <Hinweis ton="fehler" className="whitespace-pre-line">{comfyInstall.error}</Hinweis>
+      )}
+      {/* 3.1.3: git is missing, so the button that gets it, and then the
+          install goes on by itself. */}
+      {comfyInstall.error && isGitMissing(comfyInstall.error) && !isRunning(comfyInstall) && (
+        <GitInstallButton onReady={() => void startComfyInstall(lastInstallPath.current)} />
       )}
 
       {/* Ready state */}

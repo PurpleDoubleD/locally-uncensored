@@ -342,6 +342,9 @@ pub struct AppState {
     /// flips the install_status to "cancelled".
     pub comfyui_install_cancel: Arc<AtomicBool>,
     pub ollama_install: Arc<Mutex<InstallState>>,
+    /// "Install Git" (3.1.3): MinGit on Windows, the Command Line Tools on a
+    /// Mac, the package command on Linux (`install::git_portable`).
+    pub git_install: Arc<Mutex<InstallState>>,
     pub lmstudio_install: Arc<Mutex<InstallState>>,
     pub python_install: Arc<Mutex<InstallState>>,
     /// §24.9 — progress/log state for the in-app faster-whisper installer
@@ -516,6 +519,7 @@ impl AppState {
             install_status: Arc::new(Mutex::new(InstallState::default())),
             comfyui_install_cancel: Arc::new(AtomicBool::new(false)),
             ollama_install: Arc::new(Mutex::new(InstallState::default())),
+            git_install: Arc::new(Mutex::new(InstallState::default())),
             lmstudio_install: Arc::new(Mutex::new(InstallState::default())),
             python_install: Arc::new(Mutex::new(InstallState::default())),
             whisper_install: Arc::new(Mutex::new(InstallState::default())),

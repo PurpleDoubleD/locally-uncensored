@@ -615,6 +615,10 @@ pub fn run() {
     // PYTHONPATH into its own mount, and every python3 we start inherits them
     // and dies on "No module named 'encodings'".
     python::sanitize_appimage_python_env();
+    // 3.1.3: the Git that "Install Git" put into the data folder (Windows),
+    // first on PATH before anything clones. A no-op everywhere else.
+    #[cfg(desktop)]
+    commands::install::put_own_git_on_path();
 
     // Bound to a named local, not `let _ = ...`: `_log_guard` lives until the
     // end of `run`, i.e. as long as the app runs, while `_` would drop the
@@ -810,6 +814,10 @@ pub fn run() {
             commands::install::install_tts_status,
             #[cfg(desktop)]
             commands::install::check_git_installed,
+            #[cfg(desktop)]
+            commands::install::install_git,
+            #[cfg(desktop)]
+            commands::install::install_git_status,
             // Local character trainer (musubi-tuner)
             #[cfg(desktop)]
             commands::trainer::install_character_trainer,

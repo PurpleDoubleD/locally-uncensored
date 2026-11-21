@@ -101,6 +101,8 @@ import { BoundedNumberInput } from './BoundedNumberInput'
 import { CONTEXT_WINDOW_MAX, MAX_TOKENS_MAX, SUB_AGENT_LIMIT_MAX } from '../../lib/number-limits'
 import { usePageMemoryStore } from '../../stores/pageMemoryStore'
 import { SeparateComfyInstall, COMFY_PATH_CONNECT_HINT } from './SeparateComfyInstall'
+import { GitInstallButton } from '../ui/GitInstallButton'
+import { isGitMissing } from '../../lib/git-missing'
 
 // ── User profile picture (Appearance) ───────────────────────────
 // Self-contained like HfDownloadPathSetting. Stores the picture as a
@@ -1480,6 +1482,11 @@ export function ComfyUISettings() {
               </div>
             )}
             {installErr && <p className="t-micro text-red-400 whitespace-pre-line">{installErr}</p>}
+            {/* 3.1.3: git is missing, so the button that gets it, and then the
+                same run starts again. */}
+            {installPhase === 'error' && isGitMissing(installErr) && (
+              <GitInstallButton onReady={() => void useComfyInstallStore.getState().again()} />
+            )}
           </div>
         )}
       </div>

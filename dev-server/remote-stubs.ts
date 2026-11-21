@@ -99,6 +99,8 @@ export function registerRemoteStubs(routes: RouteMount): void {
   // Watchers: the clock, the list and the notification live in Rust.
   // The LoRA folder of "New character" and a LoRA file dropped there (3.1.0):
   // the folder, the file manager and the copy are Rust.
+  // "Install Git" (3.1.3): the download, the unpack and the PATH of the app
+  // are Rust.
   for (const path of [
     '/local-api/character-lora-folder', '/local-api/character-lora-folder-open',
     '/local-api/character-lora-import', '/local-api/character-lora-import-cancel',
@@ -110,6 +112,7 @@ export function registerRemoteStubs(routes: RouteMount): void {
     '/local-api/list-custom-nodes', '/local-api/remove-custom-node', '/local-api/custom-node-log',
     '/local-api/verify-model-files', '/local-api/verify-model-files-status', '/local-api/verify-model-files-cancel',
     '/local-api/comfy-model-info',
+    '/local-api/install-git', '/local-api/install-git-status',
     '/local-api/comfy-model-reveal',
     '/local-api/chat-backup-clear', '/local-api/chat-backup-reveal',
     '/local-api/bundled-model-delete-plan',
