@@ -46,6 +46,12 @@ export interface ComfyCpuBannerFacts {
    * Repair environment, not a ComfyUI of the user's own.
    */
   amdRocmServed?: boolean
+  /**
+   * Windows, and the AMD card is the one to render on, and LU has no GPU build
+   * of PyTorch for it (`amdNoGpuBuild`, an RX 6800 for example). Repair lands on
+   * the same processor wheels there.
+   */
+  amdNoGpuBuild?: boolean
 }
 
 /** Normalise whatever the backend handed us into the three known modes. */
@@ -112,6 +118,9 @@ export function comfyCpuBannerText(facts: ComfyCpuBannerFacts | null | undefined
   // 2. and 3. LU fell back to the processor on its own, so the old sentence is
   //    the true one. The AMD paragraph rides along only where there is an AMD
   //    card to talk about.
+  if (facts.amdNoGpuBuild) {
+    return `ComfyUI is running on the CPU because LU has no GPU build of PyTorch for this AMD card on Windows. ${SLOW} Repair environment would install the same processor build, and a ZLUDA custom node inside this environment cannot change that. LU installs AMD's own ROCm build for RX 7000 and RX 9000 cards. To use this card, point LU at a ComfyUI of your own that is set up for ZLUDA and set Settings → Hardware → ComfyUI GPU to Force GPU.`
+  }
   const head = `ComfyUI is running on the CPU (no usable GPU detected). ${SLOW}`
   return facts.hasAmd ? head + amdCpuAdvice(facts.isLinux, facts.amdRocmServed === true) : head
 }

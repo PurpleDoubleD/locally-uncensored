@@ -41,3 +41,24 @@ describe('NEGATIVE CONTROL: everything else reads as before', () => {
       .not.toMatch(/Repair environment/)
   })
 })
+
+describe('an AMD card LU has no GPU build for on Windows (RX 6800)', () => {
+  const facts = { startedCpu: true, mode: 'auto' as const, hasAmd: true, isLinux: false, amdRocmServed: false, amdNoGpuBuild: true }
+
+  it('says why, and does not send the user to Repair', () => {
+    const text = comfyCpuBannerText(facts)
+    expect(text).toMatch(/no GPU build of PyTorch for this AMD card on Windows/)
+    expect(text).toMatch(/Repair environment would install the same processor build/)
+    expect(text).toMatch(/ZLUDA custom node inside this environment cannot change that/)
+    expect(text).not.toMatch(/no usable GPU detected/)
+    expect(text).not.toMatch(/Reinstall/)
+  })
+
+  it('Force CPU stays the user\'s own reason', () => {
+    expect(comfyCpuBannerText({ ...facts, mode: 'cpu' })).toMatch(/you selected Force CPU/)
+  })
+
+  it('says nothing while ComfyUI is not on the CPU', () => {
+    expect(comfyCpuBannerText({ ...facts, startedCpu: false })).toBe('')
+  })
+})

@@ -197,7 +197,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (connected !== true) { setComfyCpu(null); return }
     let cancelled = false
-    backendCall<{ startedCpu?: boolean | null; mode?: string | null; hasAmd?: boolean | null; amdRocmServed?: boolean | null }>('get_comfy_gpu_status')
+    backendCall<{ startedCpu?: boolean | null; mode?: string | null; hasAmd?: boolean | null; amdRocmServed?: boolean | null; amdNoGpuBuild?: boolean | null }>('get_comfy_gpu_status')
       .then((s) => {
         if (cancelled) return
         setComfyCpu({
@@ -206,6 +206,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
           hasAmd: s?.hasAmd === true,
           isLinux: isLinux(),
           amdRocmServed: s?.amdRocmServed === true,
+          amdNoGpuBuild: s?.amdNoGpuBuild === true,
         })
       })
       .catch(() => { if (!cancelled) setComfyCpu(null) })
