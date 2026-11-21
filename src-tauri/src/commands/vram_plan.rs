@@ -94,6 +94,9 @@ pub(crate) struct Layer {
     /// The part of `weights` in MoE expert tensors (`ffn_*_exps`), the part
     /// `--n-cpu-moe` keeps on the processor.
     pub experts: u64,
+    /// The part of `weights` in dense FFN tensors (`ffn_up`, `ffn_down`,
+    /// `ffn_gate`), the part `--n-cpu-ffn` keeps on the processor.
+    pub ffn: u64,
     /// Cached K and V elements per token, 0 for a layer without a KV cache
     /// of its own (recurrent, reusing another layer's, MLA's V).
     pub k: u64,
@@ -168,6 +171,11 @@ fn is_expert_tensor(name: &str) -> bool {
     ["ffn_up_exps", "ffn_down_exps", "ffn_gate_exps", "ffn_gate_up_exps", "ffn_up_chexps", "ffn_down_chexps", "ffn_gate_chexps", "ffn_gate_up_chexps"]
         .iter()
         .any(|p| name.contains(p))
+}
+
+/// `<name>` is a dense FFN tensor (common.h, `LLM_FFN_DENSE_REGEX`).
+fn is_dense_ffn_tensor(name: &str) -> bool {
+    [".ffn_up.", ".ffn_down.", ".ffn_gate."].iter().any(|p| name.contains(p))
 }
 
 /// The layer a `blk.<il>.` tensor belongs to.
@@ -344,6 +352,8 @@ impl ModelShape {
                     l.largest = l.largest.max(bytes);
                     if is_expert_tensor(&t.name) {
                         l.experts += bytes;
+                    } else if is_dense_ffn_tensor(&t.name) {
+                        l.ffn += bytes;
                     }
                 }
             } else if is_output_tensor(&t.name) {
@@ -373,6 +383,7 @@ impl ModelShape {
             for l in &mut layers {
                 l.weights = per;
                 l.experts = 0;
+                l.ffn = 0;
                 l.largest = per / 4;
             }
             input = 0;
@@ -543,6 +554,9 @@ pub(crate) struct Placement {
     /// `--n-cpu-moe`: the expert tensors of the first this many layers stay
     /// on the processor (the rest of those layers is on the card).
     pub cpu_moe: u32,
+    /// `--n-cpu-ffn`: the dense FFN tensors of the first this many layers
+    /// stay on the processor (the rest of those layers is on the card).
+    pub cpu_ffn: u32,
 }
 
 /// Memory of one start, split by where it lives.
@@ -589,8 +603,9 @@ impl ModelShape {
             let cache = self.layer_cache(il, cfg);
             if il >= first && ngl >= 1 {
                 let cpu_experts = if (il as u32) < place.cpu_moe { l.experts } else { 0 };
-                card.weights += l.weights - cpu_experts;
-                host.weights += cpu_experts;
+                let cpu_ffn = if (il as u32) < place.cpu_ffn { l.ffn } else { 0 };
+                card.weights += l.weights - cpu_experts - cpu_ffn;
+                host.weights += cpu_experts + cpu_ffn;
                 card.cache += cache;
             } else {
                 host.weights += l.weights;
@@ -598,7 +613,7 @@ impl ModelShape {
             }
         }
         let layers_on_card = (self.layers.len() - first.min(self.layers.len())) as u32;
-        let (cc, hc) = self.compute_bytes_placed(Placement { ngl, cpu_moe: place.cpu_moe }, cfg);
+        let (cc, hc) = self.compute_bytes_placed(Placement { ngl, ..place }, cfg);
         card.compute = cc;
         host.compute = hc;
         // The image part goes to the card whenever anything does
@@ -662,6 +677,8 @@ impl ModelShape {
                     l.largest
                 } else if (il as u32) < place.cpu_moe && l.experts > 0 {
                     l.largest.min(l.experts)
+                } else if (il as u32) < place.cpu_ffn && l.ffn > 0 {
+                    l.largest.min(l.ffn)
                 } else {
                     0
                 }
@@ -688,7 +705,7 @@ impl ModelShape {
         } else {
             0
         };
-        let some_on_host = ngl < self.all_layers() || place.cpu_moe > 0;
+        let some_on_host = ngl < self.all_layers() || place.cpu_moe > 0 || place.cpu_ffn > 0;
         let card = if ngl >= 1 || cpu_largest > 0 {
             let own = if ngl >= 1 { graph + mask + attn } else { 0 };
             own.max(cpu_largest + mask) + mla_copy
@@ -811,22 +828,42 @@ impl Budget {
 /// whole layers on the processor, because the expert weights are the bulk of
 /// an MoE layer and only a few of them are read per token.
 pub(crate) fn place(shape: &ModelShape, cfg: &CacheConfig, part: &ImagePart, usable: u64) -> Placement {
+    place_with(shape, cfg, part, usable, DENSE_FFN_SPLIT)
+}
+
+/// Whether a dense model that does not fit keeps every layer on the card with
+/// the FFN weights of its first layers in RAM (`--n-cpu-ffn`, llama.cpp
+/// #26622) instead of moving whole layers to the processor.
+///
+/// OFF until it is measured on a real card: the only numbers so far are the
+/// upstream author's (RTX 4070 Ti SUPER, Linux). The check is the list in
+/// `313-WINDOWS/offload.md` on the RTX 5080 under Vulkan. If it wins there,
+/// this constant is the whole change.
+pub(crate) const DENSE_FFN_SPLIT: bool = false;
+
+/// `place`, with the dense FFN split as an argument so both ways are tested.
+pub(crate) fn place_with(shape: &ModelShape, cfg: &CacheConfig, part: &ImagePart, usable: u64, ffn_split: bool) -> Placement {
     let all = shape.all_layers();
     let fits = |p: Placement| shape.split(p, cfg, part).card.total() <= usable;
-    if fits(Placement { ngl: all, cpu_moe: 0 }) {
-        return Placement { ngl: all, cpu_moe: 0 };
+    if fits(Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 }) {
+        return Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 };
     }
+    let n = shape.n_layer();
     if shape.is_moe() {
         // Fewest layers' experts off the card such that the rest fits.
-        let n = shape.n_layer();
-        if let Some(k) = (1..=n).find(|k| fits(Placement { ngl: all, cpu_moe: *k })) {
-            return Placement { ngl: all, cpu_moe: k };
+        if let Some(k) = (1..=n).find(|k| fits(Placement { ngl: all, cpu_moe: *k, cpu_ffn: 0 })) {
+            return Placement { ngl: all, cpu_moe: k, cpu_ffn: 0 };
+        }
+    } else if ffn_split && shape.layers.iter().any(|l| l.ffn > 0) {
+        // Fewest layers' FFN weights off the card such that the rest fits.
+        if let Some(k) = (1..=n).find(|k| fits(Placement { ngl: all, cpu_moe: 0, cpu_ffn: *k })) {
+            return Placement { ngl: all, cpu_moe: 0, cpu_ffn: k };
         }
     }
-    // Dense (or an MoE whose non-expert part alone does not fit): whole
+    // Dense (or a model whose remaining part alone does not fit): whole
     // layers, from the output layer down.
-    let ngl = (0..all).rev().find(|n| fits(Placement { ngl: *n, cpu_moe: 0 })).unwrap_or(0);
-    Placement { ngl, cpu_moe: 0 }
+    let ngl = (0..all).rev().find(|n| fits(Placement { ngl: *n, cpu_moe: 0, cpu_ffn: 0 })).unwrap_or(0);
+    Placement { ngl, cpu_moe: 0, cpu_ffn: 0 }
 }
 
 /// Repeating layers a placement has on the card, for the sentence a person
@@ -836,11 +873,12 @@ pub(crate) fn place(shape: &ModelShape, cfg: &CacheConfig, part: &ImagePart, usa
 pub(crate) fn layers_on_card(shape: &ModelShape, place: Placement) -> u32 {
     let n = shape.n_layer();
     let on = place.ngl.min(shape.all_layers()).saturating_sub(1).min(n);
-    if place.cpu_moe == 0 {
+    if place.cpu_moe == 0 && place.cpu_ffn == 0 {
         return on;
     }
     let total: u64 = shape.layers.iter().map(|l| l.weights).sum();
-    let off: u64 = shape.layers.iter().take(place.cpu_moe as usize).map(|l| l.experts).sum();
+    let off: u64 = shape.layers.iter().take(place.cpu_moe as usize).map(|l| l.experts).sum::<u64>()
+        + shape.layers.iter().take(place.cpu_ffn as usize).map(|l| l.ffn).sum::<u64>();
     if total == 0 {
         return on;
     }
@@ -1061,6 +1099,8 @@ pub(crate) struct StartDecision {
     pub ngl: Option<u32>,
     /// `--n-cpu-moe`, 0 for none.
     pub cpu_moe: u32,
+    /// `--n-cpu-ffn`, 0 unless a dense model keeps FFN weights in RAM.
+    pub cpu_ffn: u32,
     /// Whether the image part is loaded.
     pub with_image_part: bool,
     /// `--cache-ram` in MiB when the prompt cache in RAM is capped, `None`
@@ -1125,11 +1165,12 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
 
     // ── a typed layer count: the person's answer, nothing is planned ──
     if let Some(typed) = req.typed_layers {
-        let plan = shape.split(Placement { ngl: typed, cpu_moe: 0 }, &cfg, &part);
+        let plan = shape.split(Placement { ngl: typed, cpu_moe: 0, cpu_ffn: 0 }, &cfg, &part);
         return StartDecision {
             ctx: cfg.ctx,
             ngl: Some(typed),
             cpu_moe: 0,
+            cpu_ffn: 0,
             with_image_part: true,
             cache_ram_mib: cache_ram_cap(&plan, host),
             why: format!("GPU layers was set to {typed} in Settings, so that is what the engine gets"),
@@ -1140,11 +1181,12 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
 
     match card {
         Card::None => {
-            let plan = shape.split(Placement { ngl: all, cpu_moe: 0 }, &cfg, &part);
+            let plan = shape.split(Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 }, &cfg, &part);
             StartDecision {
                 ctx: cfg.ctx,
                 ngl: None,
                 cpu_moe: 0,
+                cpu_ffn: 0,
                 with_image_part: true,
                 cache_ram_mib: None,
                 why: "no probe measured graphics memory on this machine, so every layer is requested exactly as before".into(),
@@ -1157,7 +1199,7 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
             // planned is the context, against what Metal lets one process
             // use and what the rest of the Mac needs.
             let limit = budget.min((host.total_ram as f64 * TIGHT_RAM_SHARE_MAC) as u64);
-            let need = |c: &CacheConfig| shape.split(Placement { ngl: all, cpu_moe: 0 }, c, &part).card.total();
+            let need = |c: &CacheConfig| shape.split(Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 }, c, &part).card.total();
             let mut raised = None;
             if !req.ctx_chosen {
                 let c = auto_ctx(cfg.ctx, train, |ctx| need(&CacheConfig { ctx, ..cfg }) + GIB <= limit);
@@ -1166,7 +1208,7 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
                     cfg.ctx = c;
                 }
             }
-            let plan = shape.split(Placement { ngl: all, cpu_moe: 0 }, &cfg, &part);
+            let plan = shape.split(Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 }, &cfg, &part);
             let total = plan.card.total();
             let advice = (total > limit).then(|| {
                 let mut text = format!(
@@ -1189,6 +1231,7 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
                 ctx: cfg.ctx,
                 ngl: None,
                 cpu_moe: 0,
+                cpu_ffn: 0,
                 with_image_part: true,
                 cache_ram_mib: None,
                 why: format!(
@@ -1216,7 +1259,7 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
             // and crawls; October 2026). A part that does not fit at all is
             // left out too.
             let none = ImagePart::default();
-            let full = |c: &CacheConfig, p: &ImagePart| place(shape, c, p, usable) == Placement { ngl: all, cpu_moe: 0 };
+            let full = |c: &CacheConfig, p: &ImagePart| place(shape, c, p, usable) == Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 };
 
             // ── the default context may grow while everything fits ──
             let mut raised = None;
@@ -1240,9 +1283,9 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
             }
             let p = place(shape, &cfg, &use_part, usable);
             let plan = shape.split(p, &cfg, &use_part);
-            let everything = p == Placement { ngl: all, cpu_moe: 0 };
+            let everything = p == Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 };
             let on = layers_on_card(shape, p);
-            let need_all = shape.split(Placement { ngl: all, cpu_moe: 0 }, &cfg, &use_part).card.total();
+            let need_all = shape.split(Placement { ngl: all, cpu_moe: 0, cpu_ffn: 0 }, &cfg, &use_part).card.total();
 
             let why = if everything {
                 let what = if use_part.bytes > 0 { "the model, its cache and its image part" } else { "the model and its cache" };
@@ -1259,6 +1302,13 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
                     "the model and its cache need about {} MiB on the card but {vram_clause}, so every layer goes on the card with the experts of the first {} of {n} layers on the processor (--n-cpu-moe), {} MiB held back for the driver",
                     need_all / MIB,
                     p.cpu_moe,
+                    reserve / MIB
+                )
+            } else if p.cpu_ffn > 0 {
+                format!(
+                    "the model and its cache need about {} MiB on the card but {vram_clause}, so every layer goes on the card with the FFN weights of the first {} of {n} layers on the processor (--n-cpu-ffn), {} MiB held back for the driver",
+                    need_all / MIB,
+                    p.cpu_ffn,
                     reserve / MIB
                 )
             } else {
@@ -1286,6 +1336,7 @@ pub(crate) fn decide(shape: &ModelShape, req: &Request, card: Card, host: Host, 
                 // the sentinel the app has always sent.
                 ngl: (p.ngl < all).then_some(p.ngl),
                 cpu_moe: p.cpu_moe,
+                cpu_ffn: p.cpu_ffn,
                 with_image_part: with_part,
                 cache_ram_mib: cache_ram_cap(&plan, host),
                 why,
@@ -1332,7 +1383,7 @@ fn q8_action(cfg: &CacheConfig) -> Option<FitAction> {
 #[allow(clippy::too_many_arguments)]
 fn card_advice(shape: &ModelShape, req: &Request, cfg: &CacheConfig, part: &ImagePart, usable: u64, p: Placement, plan: &Split, host: Host) -> FitAdvice {
     let n = shape.n_layer();
-    let all = Placement { ngl: shape.all_layers(), cpu_moe: 0 };
+    let all = Placement { ngl: shape.all_layers(), cpu_moe: 0, cpu_ffn: 0 };
     let on = layers_on_card(shape, p);
     let layers_at = |c: &CacheConfig| layers_on_card(shape, place(shape, c, part, usable));
     let fits_at = |c: &CacheConfig| place(shape, c, part, usable) == all;
@@ -1378,11 +1429,22 @@ fn card_advice(shape: &ModelShape, req: &Request, cfg: &CacheConfig, part: &Imag
             actions.push(a);
         }
     }
+    // Far from fitting, no setting closes the gap: the honest answer is
+    // another file. An MoE model already keeps its bulk in RAM at little cost.
+    if !shape.is_moe() && actions.is_empty() && clearly_too_big(shape, plan) {
+        text.push_str(" A smaller quantization or an MoE model would run much faster here.");
+    }
     if let Some(ram) = ram_advice(plan, host, p.ngl == 0, Some(())) {
         text.push(' ');
         text.push_str(&ram);
     }
     FitAdvice { text, actions }
+}
+
+/// More than a quarter of the model's weights stay off the card.
+fn clearly_too_big(shape: &ModelShape, plan: &Split) -> bool {
+    let total: u64 = shape.input + shape.output + shape.layers.iter().map(|l| l.weights).sum::<u64>();
+    plan.host.weights.saturating_mul(4) > total
 }
 
 /// The RAM half: a model that holds more than half a PC's RAM (or 70 % of a

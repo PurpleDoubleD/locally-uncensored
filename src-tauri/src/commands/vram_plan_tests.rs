@@ -100,17 +100,17 @@ fn the_weights_on_the_card_are_exactly_llama_cpp_s_for_all_layers_and_for_ten() 
     let cfg = CacheConfig::new(8192, "f16", "f16", "on");
     for name in MODELS {
         let s = shape_of(name);
-        let all = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0 }, &cfg, &ImagePart::default());
+        let all = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 }, &cfg, &ImagePart::default());
         let want = o["models"][*name]["cardWeightsAll"].as_i64().unwrap();
         let got = mib_floor(all.card.weights);
         assert!((got - want).abs() <= 2, "{name} all layers: plan {got} MiB, llama.cpp {want} MiB");
-        let ten = s.split(Placement { ngl: 10, cpu_moe: 0 }, &cfg, &ImagePart::default());
+        let ten = s.split(Placement { ngl: 10, cpu_moe: 0, cpu_ffn: 0 }, &cfg, &ImagePart::default());
         let want = o["models"][*name]["cardWeightsNgl10"].as_i64().unwrap();
         let got = mib_floor(ten.card.weights);
         assert!((got - want).abs() <= 2, "{name} -ngl 10: plan {got} MiB, llama.cpp {want} MiB");
         for (ctx, want) in o["models"][*name]["cacheOnCardNgl10"].as_object().unwrap() {
             let c = CacheConfig::new(ctx.parse().unwrap(), "f16", "f16", "on");
-            let got = mib_floor(s.split(Placement { ngl: 10, cpu_moe: 0 }, &c, &ImagePart::default()).card.cache);
+            let got = mib_floor(s.split(Placement { ngl: 10, cpu_moe: 0, cpu_ffn: 0 }, &c, &ImagePart::default()).card.cache);
             let want = want.as_i64().unwrap();
             assert!((got - want).abs() <= 1, "{name} -ngl 10 ctx {ctx}: cache on the card {got} MiB, llama.cpp {want} MiB");
         }
@@ -258,7 +258,7 @@ fn an_moe_model_that_does_not_fit_keeps_every_layer_and_moves_experts() {
     let plan = d.plan.unwrap();
     assert!(plan.card.total() <= (12_000 - 768) * MIB);
     // One layer's experts fewer would not fit.
-    let tighter = s.split(Placement { ngl: s.all_layers(), cpu_moe: d.cpu_moe - 1 }, &CacheConfig::new(8192, "f16", "f16", "auto"), &ImagePart::default());
+    let tighter = s.split(Placement { ngl: s.all_layers(), cpu_moe: d.cpu_moe - 1, cpu_ffn: 0 }, &CacheConfig::new(8192, "f16", "f16", "auto"), &ImagePart::default());
     assert!(tighter.card.total() > (12_000 - 768) * MIB);
 }
 
@@ -266,8 +266,8 @@ fn an_moe_model_that_does_not_fit_keeps_every_layer_and_moves_experts() {
 fn a_part_that_would_push_a_fitting_model_off_the_card_is_left_out() {
     let s = shape_of("gemma-4-12b-it-Q4_K_M");
     let part = ImagePart::of(manifest()["gemma4-12B-hauhau-mmproj-BF16"]["fileBytes"].as_u64().unwrap());
-    let with = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0 }, &CacheConfig::new(8192, "f16", "f16", "auto"), &part).card.total();
-    let without = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0 }, &CacheConfig::new(8192, "f16", "f16", "auto"), &ImagePart::default()).card.total();
+    let with = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 }, &CacheConfig::new(8192, "f16", "f16", "auto"), &part).card.total();
+    let without = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 }, &CacheConfig::new(8192, "f16", "f16", "auto"), &ImagePart::default()).card.total();
     // A card between the two.
     let card = (with + without) / 2 / MIB + 768;
     let d = decide(&s, &req(8192, "f16", true), free(card), pc(32), part, Calibration::default());
@@ -321,7 +321,7 @@ fn a_tight_ram_pc_caps_the_prompt_cache_and_says_so() {
 fn a_plan_that_came_out_low_is_corrected_by_what_the_engine_reported() {
     let s = shape_of("llama-3.1-8B-Instruct-Q4_K_M");
     let cfg = CacheConfig::new(8192, "f16", "f16", "auto");
-    let plan = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0 }, &cfg, &ImagePart::default());
+    let plan = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 }, &cfg, &ImagePart::default());
     let mut report = EngineReport { card: plan.card, host: plan.host, ..Default::default() };
     report.card.compute += 600 * MIB;
     let c = learn(&plan, &report, Some(10_000 * MIB), Some(10_000 * MIB - report.card.total() - 400 * MIB));
@@ -395,7 +395,7 @@ fn the_work_buffers_follow_what_llama_server_reported_and_err_high() {
             let ngl: u32 = it.next().unwrap().parse().unwrap();
             // Metal does not copy a processor layer's cache to the card.
             let cfg = CacheConfig { offload_copies_cache: false, ..CacheConfig::new(ctx, kv, kv, "auto") };
-            let (card, host) = s.compute_bytes_placed(Placement { ngl: ngl.min(s.all_layers()), cpu_moe: 0 }, &cfg);
+            let (card, host) = s.compute_bytes_placed(Placement { ngl: ngl.min(s.all_layers()), cpu_moe: 0, cpu_ffn: 0 }, &cfg);
             let want_card = v[0].as_f64().unwrap() as i64;
             let want_host = v[1].as_f64().unwrap() as i64;
             for (what, got, want) in [("card", (card / MIB) as i64, want_card), ("host", (host / MIB) as i64, want_host)] {
@@ -470,12 +470,80 @@ fn on_vulkan_and_cuda_a_partial_offload_pays_for_a_processor_layer_s_cache_on_th
     let s = shape_of("llama-3.1-8B-Instruct-Q4_K_M");
     let vulkan = CacheConfig { offload_copies_cache: true, ..CacheConfig::new(65536, "f16", "f16", "auto") };
     let metal = CacheConfig { offload_copies_cache: false, ..vulkan };
-    let part = Placement { ngl: 20, cpu_moe: 0 };
+    let part = Placement { ngl: 20, cpu_moe: 0, cpu_ffn: 0 };
     let layer = s.layer_cache(0, &vulkan);
     let (v, _) = s.compute_bytes_placed(part, &vulkan);
     let (m, _) = s.compute_bytes_placed(part, &metal);
     assert_eq!(v - m, layer + 64 * MIB);
     // Every layer on the card: nothing to copy.
-    let all = Placement { ngl: s.all_layers(), cpu_moe: 0 };
+    let all = Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 };
     assert_eq!(s.compute_bytes_placed(all, &vulkan), s.compute_bytes_placed(all, &metal));
+}
+
+// ── dense models: FFN weights in RAM instead of whole layers (--n-cpu-ffn) ──
+
+#[test]
+fn the_dense_ffn_weights_are_read_from_the_head_and_experts_are_not() {
+    let dense = shape_of("qwen3-8B-Q4_K_M");
+    assert!(!dense.is_moe());
+    assert!(dense.layers.iter().all(|l| l.ffn > 0 && l.ffn < l.weights));
+    let moe = shape_of("qwen3-30B-A3B-Q4_K_M");
+    assert!(moe.is_moe());
+    assert!(moe.layers.iter().all(|l| l.ffn + l.experts <= l.weights));
+}
+
+#[test]
+fn the_ffn_split_keeps_every_layer_and_moves_as_few_as_fit() {
+    let s = shape_of("qwen3.5-27B-Q4_K_M");
+    let cfg = CacheConfig::new(8192, "f16", "f16", "auto");
+    let none = ImagePart::default();
+    let whole = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 }, &cfg, &none).card.total();
+    let usable = whole - whole / 6;
+    let p = place_with(&s, &cfg, &none, usable, true);
+    assert_eq!((p.ngl, p.cpu_moe), (s.all_layers(), 0));
+    assert!(p.cpu_ffn > 0 && p.cpu_ffn <= s.n_layer());
+    assert!(s.split(p, &cfg, &none).card.total() <= usable);
+    let fewer = Placement { cpu_ffn: p.cpu_ffn - 1, ..p };
+    assert!(s.split(fewer, &cfg, &none).card.total() > usable);
+    // Moving weights moves bytes, it does not make any.
+    let (a, b) = (s.split(p, &cfg, &none), s.split(Placement { cpu_ffn: 0, ..p }, &cfg, &none));
+    assert_eq!(a.card.weights + a.host.weights, b.card.weights + b.host.weights);
+}
+
+#[test]
+fn with_the_split_off_a_dense_model_moves_whole_layers_as_before() {
+    let s = shape_of("qwen3.5-27B-Q4_K_M");
+    let cfg = CacheConfig::new(8192, "f16", "f16", "auto");
+    let none = ImagePart::default();
+    let whole = s.split(Placement { ngl: s.all_layers(), cpu_moe: 0, cpu_ffn: 0 }, &cfg, &none).card.total();
+    let p = place_with(&s, &cfg, &none, whole - whole / 6, false);
+    assert_eq!(p.cpu_ffn, 0);
+    assert!(p.ngl < s.all_layers());
+}
+
+#[test]
+fn the_ffn_split_never_touches_an_moe_model_or_one_that_fits() {
+    let cfg = CacheConfig::new(8192, "f16", "f16", "auto");
+    let none = ImagePart::default();
+    let moe = shape_of("qwen3-30B-A3B-Q4_K_M");
+    let p = place_with(&moe, &cfg, &none, 11_000 * MIB, true);
+    assert_eq!(p.cpu_ffn, 0);
+    assert!(p.cpu_moe > 0);
+    let dense = shape_of("qwen3-8B-Q4_K_M");
+    let p = place_with(&dense, &cfg, &none, 64_000 * MIB, true);
+    assert_eq!(p, Placement { ngl: dense.all_layers(), cpu_moe: 0, cpu_ffn: 0 });
+}
+
+#[test]
+fn a_model_far_too_big_for_the_card_is_told_of_a_better_file() {
+    let s = shape_of("qwen3.5-27B-Q4_K_M");
+    let cfg = CacheConfig::new(8192, "q8_0", "q8_0", "auto");
+    let none = ImagePart::default();
+    let usable = 4_000 * MIB;
+    let p = place(&s, &cfg, &none, usable);
+    let plan = s.split(p, &cfg, &none);
+    let r = Request { cache: cfg, typed_layers: None, ctx_chosen: true };
+    let a = card_advice(&s, &r, &cfg, &none, usable, p, &plan, pc(64));
+    assert!(a.text.contains("smaller quantization"), "{}", a.text);
+    assert!(!a.text.trim_end().ends_with("for you."), "{}", a.text);
 }

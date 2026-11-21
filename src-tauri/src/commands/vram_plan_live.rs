@@ -83,7 +83,7 @@ fn live_plan_against_the_real_engine() {
                 reading.as_ref().map(|r| Card::Measured(Budget { bytes: r.bytes, free: r.free, learned_overhead: 0 })).unwrap_or(Card::None)
             };
             let d = decide(&shape, &plan_request(&tuning), card, host, ImagePart::from_head(part_bytes, part_head.as_ref()), Calibration::default());
-            let planned = EngineTuning { ctx: d.ctx, plan_cpu_moe: d.cpu_moe, plan_cache_ram_mib: d.cache_ram_mib, ..tuning.clone() };
+            let planned = EngineTuning { ctx: d.ctx, plan_cpu_moe: d.cpu_moe, plan_cpu_ffn: d.cpu_ffn, plan_cache_ram_mib: d.cache_ram_mib, ..tuning.clone() };
             let mmproj = if d.with_image_part { part.as_deref() } else { None };
             let args = server_args(model, &planned, port, None, mmproj, d.ngl, windows);
             let ram_before = available_ram();
@@ -128,6 +128,7 @@ fn live_plan_against_the_real_engine() {
                 "loadSeconds": started.elapsed().as_secs(),
                 "ngl": d.ngl,
                 "cpuMoe": d.cpu_moe,
+                "cpuFfn": d.cpu_ffn,
                 "imagePart": mmproj.is_some(),
                 "freeBeforeMiB": free_before.map(mib),
                 "plan": {
