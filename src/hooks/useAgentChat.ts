@@ -73,7 +73,8 @@ import {
 import { detachToolCall, runMessageStarted, runMessageEnded } from '../stores/backgroundJobStore'
 import { summarizeTurn } from '../lib/turn-summary'
 import { buildVisionFeedback, dropOlderScreenFrames } from '../api/vision-feedback'
-import { COMPUTER_USE_TOOL_NAME, onlyTheTaskForTheScreen, withComputerUsePrompt } from '../lib/computer/prompt'
+import { COMPUTER_TASK_TOOL_NAME, COMPUTER_USE_TOOL_NAME, onlyTheTaskForTheScreen, withComputerUsePrompt } from '../lib/computer/prompt'
+import { browserStepsAside, isLuBrowserTool, withScreenTools } from '../lib/computer/screen-or-browser'
 import { memoryPairForRun } from '../lib/computer/memory-policy'
 import { getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { buildRequestMessages, trimWorkingHistory } from '../lib/context-decay'
@@ -1211,6 +1212,14 @@ export function useAgentChat() {
     // every look in the history of the chat and went in circles (box,
     // 09.10.2026). A cloud model keeps both.
     const screenByTaskOnly = onlyTheTaskForTheScreen(providerId, (name) => !!toolRegistry.getToolByName(name), activeModel)
+    // Computer Control on: "use my browser" means the user's screen, not a
+    // window of LU's own (lib/computer/screen-or-browser.ts).
+    const screenToolHere = [COMPUTER_TASK_TOOL_NAME, COMPUTER_USE_TOOL_NAME].some((name) => {
+      const tool = toolRegistry.getToolByName(name)
+      return !!tool && permissions[tool.category] !== 'blocked' && (!curated || curated.includes(name))
+        && !(opts?.readOnly && !allowedInReadOnlyTurn(name))
+    })
+    const browserAside = browserStepsAside(userContent, screenToolHere)
     // Cloud mode makes pictures and clips through Create, never through this
     // computer's pipeline: plain chat already strips the local pair (useChat),
     // Agent mode offered it next to create_order, and a small model then
@@ -1219,6 +1228,7 @@ export function useAgentChat() {
     // The settings pair rides only on a turn about settings (A11).
     const toolMatchesCurated = (name: string) =>
       (!curated || curated.includes(name)) && !(opts?.readOnly && !allowedInReadOnlyTurn(name)) && !(screenByTaskOnly && name === COMPUTER_USE_TOOL_NAME)
+      && !(browserAside && isLuBrowserTool(name))
       && !(localMediaOff && isMediaTool(name))
       && (isWatcherToolName(name) ? opts?.watcherTools === true : (opts?.settingsTools === true || !isSelfControlToolName(name)))
     // Cloud mode AND Create in chat released for the account. Without the
@@ -1229,7 +1239,8 @@ export function useAgentChat() {
     // day"; they are put back, whatever it chose.
     // The settings pair likewise: the router has no say once the message is
     // about settings.
-    const withCreateTools = <T extends { name: string }>(chosen: T[], all: T[]): T[] => {
+    const withCreateTools = <T extends { name: string; category?: string }>(routed: T[], all: T[]): T[] => {
+      const chosen = withScreenTools(routed, all.filter((t) => toolMatchesCurated(t.name)), permissions)
       const extra = (n: string) => (opts?.createTools && isCreateToolName(n))
         || (isWatcherToolName(n) ? opts?.watcherTools : opts?.settingsTools && isSelfControlToolName(n))
       return opts?.createTools || opts?.settingsTools || opts?.watcherTools
