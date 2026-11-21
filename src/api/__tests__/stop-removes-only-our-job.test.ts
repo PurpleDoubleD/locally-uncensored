@@ -118,7 +118,7 @@ describe('the Create lane stops its OWN render', () => {
 
   it('cancel takes our promptId out of the queue instead of blanket-interrupting', () => {
     expect(create).toContain('const ownPromptId = useCreateStore.getState().currentPromptId')
-    expect(create).toContain('await abandonPrompt(ownPromptId)')
+    expect(create).toContain('await settleWithin(abandonPrompt(ownPromptId), CANCEL_ANSWER_LIMIT_MS)')
     expect(create).not.toContain('await cancelGeneration()')
   })
 
@@ -130,7 +130,7 @@ describe('the Create lane stops its OWN render', () => {
     // Every watchdog exit lands in the same catch: the old code just stopped
     // polling, so a "stalled" render kept the GPU busy for another hour and
     // delivered its file to nobody.
-    expect(create.match(/await abandonPrompt\(ownPromptId\)/g)?.length).toBe(2)
+    expect(create.match(/await settleWithin\(abandonPrompt\(ownPromptId\), CANCEL_ANSWER_LIMIT_MS\)/g)?.length).toBe(2)
   })
 })
 

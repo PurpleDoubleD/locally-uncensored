@@ -107,6 +107,26 @@ export const KREA2_STYLE_LORA = {
   sha256: 'f50df5a9e62e4be8aa926a63dd5bb1a64770c4004f763c1208007ae13daa82b8',
 } as const
 
+/** Largest canvas the Krea 2 style reference shift is computed for. */
+const KREA2_SHIFT_MAX_PIXELS = 2560 * 1440
+
+/**
+ * The size ModelSamplingFlux is told for a Krea 2 run with references. The
+ * node raises its shift linearly with the pixels and ComfyUI applies it as
+ * e^shift: 18 at 2560x1440, 380 at 3840x2160, where all but the last sampling
+ * step stay above 98 % noise and the picture comes out destroyed (Discord
+ * bug-reports 21.11.2026). The canvas itself keeps its full size, only the
+ * shift stops growing at the largest size known to work.
+ */
+export function krea2ShiftCanvas(width: number, height: number): { width: number; height: number } {
+  const pixels = width * height
+  if (pixels <= KREA2_SHIFT_MAX_PIXELS) return { width, height }
+  const scale = Math.sqrt(KREA2_SHIFT_MAX_PIXELS / pixels)
+  // Rounded down to the node's step of 8, so the cap is never passed.
+  const down = (side: number) => Math.max(16, Math.floor((side * scale) / 8) * 8)
+  return { width: down(width), height: down(height) }
+}
+
 /** The video model a local run of `intent` actually uses: the stored pick
  *  where the lane can run it, else the first one it can (useCreate does the
  *  same before it builds). */

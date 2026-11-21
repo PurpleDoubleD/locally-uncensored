@@ -87,6 +87,7 @@ import { knownMacMemoryGb } from '../lib/mac-memory'
 import { MIN_TRAIN_IMAGES, maxTrainImages, tooFewTrainPhotosLine } from '../lib/train-image-cap'
 import { improveKindForIntent, IMPROVING_PROMPT, type ImproveOutcome } from '../lib/render/improve-prompt'
 import { elapsedLine } from '../lib/elapsed-line'
+import { CANCEL_ANSWER_LIMIT_MS, comfyBusyLabel, settleWithin } from '../lib/comfy-busy-line'
 import { cancelFreeAfterRender, freeAfterRenderMode, scheduleFreeAfterRender } from '../lib/free-after-render'
 import { improvePrompt } from '../lib/render/improve-prompt-run'
 import { currentChatModelList, currentHelperModel } from '../lib/cloud-helper-model'
@@ -2484,8 +2485,12 @@ export function useCreate() {
           let phasePct = 10
           store.setProgressPhase('queued')
           const line = elapsedLine((text) => setProgress(phasePct, text), 'Queued...')
+          let phaseLabel = 'Queued...'
+          let silentSince: number | null = null
           const setPhase = (pct: number, label: string) => {
             phasePct = pct
+            phaseLabel = label
+            silentSince = null
             line.setLabel(label)
           }
 
@@ -2604,7 +2609,14 @@ export function useCreate() {
               const alive = await checkComfyConnection(COMFY_PROBE_LIMIT_MS)
               if (completionHandled) return
               if (!alive && Date.now() - asked < COMFY_PROBE_LIMIT_MS * 0.8) { cleanup(); reject(new Error('ComfyUI stopped responding during generation')); return }
-              if (!alive) line.setLabel('ComfyUI is busy and does not answer yet...')
+              if (!alive) {
+                silentSince ??= asked
+                line.setLabel(comfyBusyLabel(Date.now() - silentSince))
+              } else if (silentSince !== null) {
+                // It answers again: the busy line must not outlive the wait.
+                silentSince = null
+                line.setLabel(phaseLabel)
+              }
               // A prompt still in ComfyUI's queue is alive even when the socket
               // goes quiet (long model loads emit no events) — refresh the
               // watchdog once a minute from the queue itself.
@@ -2848,7 +2860,9 @@ export function useCreate() {
       const ownPromptId = useCreateStore.getState().currentPromptId
       const lateLook = (err as { lateLook?: string } | null)?.lateLook
       if (ownPromptId && !lateLook) {
-        try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+        // Bounded like Cancel: a ComfyUI that does not answer must not hold
+        // the end of the run. The request itself goes on in the background.
+        await settleWithin(abandonPrompt(ownPromptId), CANCEL_ANSWER_LIMIT_MS)
       }
       // A stall verdict is LU giving up, not ComfyUI: what it still delivers
       // goes to the gallery, and the stall line goes away with it.
@@ -3168,7 +3182,8 @@ export function useCreate() {
     // interrupts when ours is the one running.
     const ownPromptId = useCreateStore.getState().currentPromptId
     if (ownPromptId) {
-      try { await abandonPrompt(ownPromptId) } catch { /* best effort */ }
+      // A ComfyUI too busy to answer must not hold the app in "generating".
+      await settleWithin(abandonPrompt(ownPromptId), CANCEL_ANSWER_LIMIT_MS)
     }
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     useCreateStore.getState().setIsGenerating(false)

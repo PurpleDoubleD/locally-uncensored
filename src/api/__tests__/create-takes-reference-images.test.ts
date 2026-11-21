@@ -125,6 +125,11 @@ describe('Krea 2: the official style reference graph', () => {
     })])
     expect(KREA2_STYLE_LORA.sha256).toBe('f50df5a9e62e4be8aa926a63dd5bb1a64770c4004f763c1208007ae13daa82b8')
   })
+  it('4K keeps its canvas, the sampling patch stops at the shift of 2560x1440', async () => {
+    const wf = await buildDynamicWorkflow(image(KREA, ['a.png'], { width: 3840, height: 2160 }))
+    expect(nodeOf(wf, 'ModelSamplingFlux')![1].inputs).toMatchObject({ width: 2560, height: 1440 })
+    expect(nodeOf(wf, 'EmptyLatentImage')?.[1].inputs ?? nodeOf(wf, 'EmptySD3LatentImage')?.[1].inputs).toMatchObject({ width: 3840, height: 2160 })
+  })
   it('without references the plain Krea 2 graph stays (regression guard)', async () => {
     const wf = await buildDynamicWorkflow(image(KREA, []))
     expect(classTypes(wf)).not.toContain('TextEncodeQwenImageEditPlus')
