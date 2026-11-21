@@ -368,7 +368,7 @@ export function NeuronPanel({ chrome = {} }: { chrome?: WindowChrome }) {
             />
           ) : (
             <>
-              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-4 pt-3 pb-4 space-y-4" data-testid="neuron-body">
+              <div className="flex-1 min-h-0 overflow-y-scroll scrollbar-thin px-4 pt-3 pb-4 space-y-4" data-testid="neuron-body">
                 <section data-testid="neuron-step-model" aria-label="Model to steer">
                   <div className="flex items-center gap-2">
                     <label className="t-micro font-medium text-gray-500 dark:text-gray-400 shrink-0" htmlFor="neuron-model">Model</label>

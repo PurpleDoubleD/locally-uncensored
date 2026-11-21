@@ -84,7 +84,7 @@ export default defineConfig({
     // run on it, where the engines really differ: the voice session (audio
     // path) and the chat look (3.1.0: a pinch arrives as gesture events, not
     // as ctrl + wheel; CSS zoom). `npx playwright test --project=webkit`.
-    { name: 'webkit', testMatch: /(voice-(session|cold-start|thinking)-live|chat-look|w33-rename-dialog-closes)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
+    { name: 'webkit', testMatch: /(voice-(session|cold-start|thinking)-live|chat-look|w33-rename-dialog-closes|neuron-window-resize)\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
   ],
   webServer: [
     {
