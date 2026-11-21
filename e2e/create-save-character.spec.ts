@@ -89,7 +89,7 @@ test('frames across a video become a saved character that survives a reload', as
   await expect(dialog).toHaveCount(0)
   await expect(characterPill(page)).toBeChecked()
   await expect(page.locator('[data-hub-training]')).toContainText('Train a model')
-  await expect(page.getByText(/^4\/30 photos\./)).toBeVisible()
+  await expect(page.locator('[data-hub-train-photos="4"]')).toBeVisible()
 
   // After a reload the character is still there (the boot script puts the app
   // back into local mode, and the character is local anyway). One click adds
@@ -101,7 +101,7 @@ test('frames across a video become a saved character that survives a reload', as
   const chip = page.getByTitle('Add the 4 photos of Sir Aldous')
   await expect(chip).toBeVisible({ timeout: 15_000 })
   await chip.click()
-  await expect(page.getByText(/^4\/100 photos\./)).toBeVisible()
+  await expect(page.locator('[data-hub-train-photos="4"]')).toBeVisible()
 })
 
 test('the lightbox of a video offers the same action, straight into a training set', async ({ page }) => {
@@ -117,5 +117,5 @@ test('the lightbox of a video offers the same action, straight into a training s
   await dialog.getByRole('button', { name: 'Train with 7 frames' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(characterPill(page)).toBeChecked()
-  await expect(page.getByText(/^7\/30 photos\./)).toBeVisible()
+  await expect(page.locator('[data-hub-train-photos="7"]')).toBeVisible()
 })

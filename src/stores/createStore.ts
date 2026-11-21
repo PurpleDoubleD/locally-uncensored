@@ -24,6 +24,7 @@ import { downgradeMirror, sanitizeEntries } from '../lib/gallery-persist'
  * results, the in-flight flag). Everything else in the blob is a preference.
  */
 const RUNTIME_ONLY_KEYS: readonly string[] = [
+  'hubPhotoImage', 'hubNewDraft',
   'backend', 'source', 'mask', 'references', 'endImage', 'imageReferences', 'caps', 'isGenerating', 'comfyCorsBlocked',
   // A queue of source images from yesterday must never start a run today.
   'batchSources', 'batchRun', 'batchOriginal',
@@ -119,6 +120,17 @@ export interface SwapFigure {
   /** The character of the Character area this person becomes, by name, so
    *  the row says "→ Bean". Unset for a photo picked by hand. */
   character?: string | null
+}
+
+/** The page "New character" on its way to the training and back. */
+export interface HubNewDraft {
+  photos: File[]
+  name: string
+  /** The word on the training page, and a description per photo (by place). */
+  trigger: string
+  captions: string[]
+  /** Filled by the way back: the page takes all of it up again. */
+  back?: boolean
 }
 
 /** Swap Character in two steps (14.11.2026, as on the web): the first frame
@@ -571,6 +583,12 @@ export interface CreateState {
   hubStep: HubStep
   /** The character picked in step 1, null for "Just use a photo". Runtime-only. */
   hubCharacter: HubCharacter | null
+  /** Image with a photo character (3.1.3, as on the web): the run is an Edit
+   *  with its photos as references, and it stays in the Character area. */
+  hubPhotoImage: { key: string; name: string } | null
+  /** What the page "New character" held when it went on to the training, so
+   *  the way back finds it again. Runtime only. */
+  hubNewDraft: HubNewDraft | null
   /** The action last open in the area, so the pill goes back to it. */
   hubLastIntent: CreateIntent | null
   /** Swap and Motion on the cloud (14.11.2026): the sound of the result
@@ -851,6 +869,8 @@ export interface CreateState {
   setSwapBuilt: (built: SwapBuilt | null) => void
   setScene: (patch: Partial<SceneState>) => void
   setHubStep: (step: HubStep) => void
+  setHubPhotoImage: (v: { key: string; name: string } | null) => void
+  setHubNewDraft: (v: HubNewDraft | null) => void
   setHubCharacter: (c: HubCharacter | null) => void
   /** The pill "Character": back to the action that was open, else step 1. */
   openCharacterHub: () => void
@@ -1368,6 +1388,8 @@ export const useCreateStore = create<CreateState>()(
       scene: EMPTY_SCENE,
       hubStep: 'who' as HubStep,
       hubCharacter: null as HubCharacter | null,
+      hubPhotoImage: null as { key: string; name: string } | null,
+      hubNewDraft: null as HubNewDraft | null,
       hubLastIntent: null as CreateIntent | null,
       sound: 'original' as 'original' | 'none' | 'lipsync',
       lipsyncModel: 'latentsync',
@@ -1540,6 +1562,8 @@ export const useCreateStore = create<CreateState>()(
           ? (isMlxImageHost() && !mlxTakesEditImage(get().imageModelList) ? 'image' : 'edit')
           : asked
         const changed = get().intent() !== intent
+        // Any tab picked by name leaves Image with a photo character.
+        if (get().hubPhotoImage) set({ hubPhotoImage: null })
         set((s) => withOwnStudioOptions(s, withMacEditCanvas(s, ((): Partial<CreateState> => {
         const patch = ((): Partial<CreateState> => {
         // Clear intent-incompatible inputs: intents without a source drop both;
@@ -1817,6 +1841,8 @@ export const useCreateStore = create<CreateState>()(
       setSwapBuilt: (swapBuilt) => set({ swapBuilt }),
       setScene: (patch) => set((s) => ({ scene: { ...s.scene, ...patch } })),
       setHubStep: (hubStep) => set({ hubStep }),
+      setHubPhotoImage: (hubPhotoImage) => set({ hubPhotoImage }),
+      setHubNewDraft: (hubNewDraft) => set({ hubNewDraft }),
       setHubCharacter: (hubCharacter) => set({ hubCharacter }),
       openCharacterHub: () => {
         const s = get()

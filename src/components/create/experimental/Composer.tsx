@@ -481,6 +481,9 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const hubStage = useHubRun((st) => st.stage)
   const hubRun = hub ? (hubSwap ?? hubStage?.run ?? null) : null
   const hubField = hubRun?.field ?? null
+  // The training page and the unsaved new character (3.1.3) have no window.
+  const hubStep = useCreateStore((s) => s.hubStep)
+  const hubTraining = hub && intent === 'character' && characterTab === 'train'
   const hubAction = actionOfIntent(intent)
   // The field stands on every action. Where the action takes no text, it
   // says so and takes none.
@@ -493,11 +496,24 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
   const setHubWindow = useHubRun((st) => st.setWindow)
   const hubTakesNegative = needPrompt && !optionalPrompt && negSupported
   useEffect(() => { if (hub) setHubWindow(needPrompt && !hubField, hubTakesNegative) }, [hub, needPrompt, hubField, hubTakesNegative, setHubWindow])
+  const setTrainStart = useHubRun((st) => st.setTrainStart)
+  const trainDoes = useRef({ run: guardedGenerate, cancel: guardedCancel })
+  useEffect(() => { trainDoes.current = { run: guardedGenerate, cancel: guardedCancel } })
+  useEffect(() => {
+    if (!hubTraining) return
+    setTrainStart({ ready: canGenerate, running: isGenerating, price: createPrice ?? null, run: () => trainDoes.current.run(), cancel: () => trainDoes.current.cancel() })
+  }, [hubTraining, canGenerate, isGenerating, createPrice, setTrainStart])
+  useEffect(() => { if (!hubTraining) setTrainStart(null) }, [hubTraining, setTrainStart])
   const submit = () => {
     if (hubRun) { if (hubRun.ready && !hubRun.running) hubRun.run(); return }
     if (canGenerate && !isGenerating) guardedGenerate()
   }
 
+
+  // The training page has its one button in the page (TrainStart); until a
+  // new character is saved there is nothing to run. On both, no row and no
+  // window under the page (David, 21.11.2026).
+  if (hubTraining || (hub && hubStep === 'new')) return null
 
   return (
     // A stable min-height (bottom-anchored) so the prompt window occupies the
@@ -551,7 +567,7 @@ export function Composer({ onOpenAdvanced, onOpenWorkflows, hub = false }: Props
                 placeholder={
                   hubField ? hubField.placeholder
                   : hubNoText ? `${hubAction && !(intent === 'character' && characterTab === 'train') ? ACTION_LABEL[hubAction] : 'Training'} needs no text.`
-                  : hub && characterUse && hubStage?.placeholder ? hubStage.placeholder
+                  : hub && (characterUse || intent === 'edit') && hubStage?.placeholder ? hubStage.placeholder
                   : characterUse
                     ? 'Describe the scene for your character…'
                     // R5-66: the shared 'edit' placeholder promises a maskless

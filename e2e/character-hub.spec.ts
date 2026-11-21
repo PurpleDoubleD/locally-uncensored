@@ -422,7 +422,7 @@ test('local mode on a Mac: Swap stays on the cloud (no local way there), the loc
   await boot(page, { hub: true, local: true, mock: { platform: 'mac', mlx: { ltx2EngineInstalled: true, installedVideos: ['ltx-2.3-q4', 'ltx-2.3-motion-control'], loras: [{ name: 'char_opa_zimage.safetensors' }] } } })
   await openCharacterHub(page)
   await expect(page.locator('[data-hub-character="mlx:char_opa_zimage.safetensors"]')).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 })
-  await expect(page.locator('[data-hub-trigger]')).toContainText('Trigger word')
+  await expect(page.locator('[data-hub-character="mlx:char_opa_zimage.safetensors"]')).toHaveAttribute('title', /trigger word/)
   // A local LoRA has no picture and no photos here: a line says so, nothing stands in.
   await expect(page.locator('[data-hub-no-photos]')).toBeVisible()
   // Shorter than the room: the block stands in the middle between the row
@@ -451,6 +451,10 @@ test('local mode on a Mac: Swap stays on the cloud (no local way there), the loc
   await shoot(page, 'lokal-b')
   await page.getByRole('radio', { name: 'Swap Character, runs on LU Cloud' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
+  // The sheet of the Character area carries the LU mark, no stock icons.
+  await expect(page.getByTestId('cloud-teaser-logo').locator('img')).toBeVisible()
+  await expect(page.getByRole('dialog').locator('.lucide-cloud, .lucide-monitor-down, .lucide-sparkles, .lucide-external-link')).toHaveCount(0)
+  await shoot(page, 'cloud-blatt')
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   // Motion runs on this Mac: the LTX-2.3 pack, no sound choice.
@@ -469,6 +473,9 @@ test('the training is a page of the area, with the way back to the stage', async
   const hub = page.locator('[data-character-hub]')
   await expect(hub).toHaveAttribute('data-character-hub', 'panel')
   await expect(page.locator('[data-hub-training]')).toContainText('Train a model')
+  // Back goes to the page it came from (photos and name), then to the stage.
+  await page.locator('[data-hub-back]').click()
+  await expect(hub).toHaveAttribute('data-character-hub', 'new')
   await page.locator('[data-hub-back]').click()
   await expect(page.locator('[data-hub-stage]')).toBeVisible()
   await expect(characterPill(page)).toHaveAttribute('aria-checked', 'true')
@@ -529,14 +536,15 @@ test('no character yet: the three steps, one button and the same window', async 
   await page.locator('[data-hub-new-name]').fill('Oma')
   await expect(page.locator('[data-hub-save-summary]')).toHaveText('5 photos · kept on this computer · free')
   await shoot(page, 'neu-mit-fotos')
-  await expectWindowAt(page, onImage)
+  // Until it is saved nothing stands under the page: no row, no window.
+  await expect(page.locator('[data-prompt-window], [data-hub-actions]')).toHaveCount(0)
   await page.getByRole('button', { name: 'Save Oma', exact: true }).click()
-  await expect(hub).toHaveAttribute('data-character-hub', 'what')
+  await expect(hub).toHaveAttribute('data-character-hub', 'panel')
   await expect(page.locator('[data-hub-tab-name]')).toHaveText('Oma')
   // A photo character: the field asks for the picture, the button goes on
   // to Edit with its photos.
   await expect(page.locator('[data-prompt-window] textarea')).toHaveAttribute('placeholder', 'Describe a new picture of Oma')
-  await expect(page.locator('[data-prompt-window]').getByRole('button', { name: 'Continue in Edit' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Continue in Edit' })).toHaveCount(0)
   await expectWindowAt(page, onImage)
   // Rename on the desktop: the three dots at the tab, a short list in the
   // style of the model list (no card, no grey bubble), Rename in the tab.

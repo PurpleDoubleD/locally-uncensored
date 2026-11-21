@@ -99,7 +99,8 @@ function CreateExperimentalInner() {
   const threeDWay = useCreateStore((s) => s.threeDWay)
   // The Character area (3.1.0 part B) takes the place of the stage and the
   // prompt window for its four intents; gallery and presets stay beside it.
-  const hubOpen = isHubIntent(intent)
+  const hubPhotoImage = useCreateStore((s) => !!s.hubPhotoImage)
+  const hubOpen = isHubIntent(intent) || (intent === 'edit' && hubPhotoImage)
   // The Character tab stands on the middle axis of the prompt window: the
   // room the rails take at the right is kept free at the left as well
   // (index.css, .lu-hub-row reads --hub-rails).

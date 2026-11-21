@@ -145,7 +145,7 @@ function TabsRow({ list, loading, picked, photoOnly, fit, onPick, onPhotoOnly, o
   if (c) {
     items.push({ key: 'rename', label: 'Rename', data: 'data-hub-rename', run: () => { setError(null); setAsking(false); setRenaming(true) } })
     if (saved && c.photos) {
-      items.push({ key: 'train', label: 'Train a model', data: 'data-hub-train', run: () => { sendPhotosToStudio(c.name, c.photos ?? []); useCreateStore.getState().setHubStep('panel') } })
+      items.push({ key: 'train', label: 'Train a model', data: 'data-hub-train', run: () => { const st = useCreateStore.getState(); st.setHubNewDraft(null); if (!st.triggerWord.trim()) st.setTriggerWord(c.name); sendPhotosToStudio(c.name, c.photos ?? []); useCreateStore.getState().setHubStep('panel') } })
     }
     if (cloudLora) {
       // These two show how far they are in their row, so the list stays open.
@@ -173,13 +173,6 @@ function TabsRow({ list, loading, picked, photoOnly, fit, onPick, onPhotoOnly, o
     line = <span role="alert" className="text-red-500 dark:text-red-400">{error}</span>
   } else if (c && renaming && c.ref) {
     line = <span className="hub-dim">The trigger word stays.</span>
-  } else if (c?.ref) {
-    line = (
-      <span className="hub-dim" data-hub-trigger>
-        Trigger word: {c.ref.triggerWord}
-        {c.kind === 'local' && <>. In Chat, name it: “a picture of {c.ref.name ?? c.name} at the beach”.</>}
-      </span>
-    )
   }
 
   return (

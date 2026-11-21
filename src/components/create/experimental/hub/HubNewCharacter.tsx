@@ -53,10 +53,16 @@ interface Props {
 }
 
 export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
-  const [photos, setPhotos] = useState<File[]>([])
+  // Back from the training: the photos, the name and the way are as they were.
+  const [draft] = useState(() => {
+    const d = useCreateStore.getState().hubNewDraft
+    return d?.back ? d : null
+  })
+  useEffect(() => { useCreateStore.getState().setHubNewDraft(null) }, [])
+  const [photos, setPhotos] = useState<File[]>(draft?.photos ?? [])
   const [lora, setLora] = useState<File | null>(null)
-  const [name, setName] = useState('')
-  const [way, setWay] = useState<Way>('keep')
+  const [name, setName] = useState(draft?.name ?? '')
+  const [way, setWay] = useState<Way>(draft ? 'train' : 'keep')
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
@@ -135,8 +141,22 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
         return
       }
       if (way === 'train') {
-        if (clean) useCreateStore.getState().setTriggerWord(clean)
+        const st = useCreateStore.getState()
+        // A word typed on the training page stays while the name is the same.
+        const word = draft?.trigger && draft.name === clean ? draft.trigger : clean
+        if (word) st.setTriggerWord(word)
+        const already = st.trainImages.length
         sendPhotosToStudio(clean || 'photo', photos)
+        if (draft) {
+          const said = new Map(draft.photos.map((f, i) => [f, draft.captions[i] ?? '']))
+          const now = useCreateStore.getState()
+          photos.forEach((f, i) => {
+            const text = said.get(f)
+            const img = now.trainImages[already + i]
+            if (text && img) now.setTrainCaption(img.name, text)
+          })
+        }
+        useCreateStore.getState().setHubNewDraft({ photos: [], name: clean, trigger: '', captions: [] })
         // The training is a panel of the area (intent character, tab train).
         useCreateStore.getState().setHubStep('panel')
         return
@@ -164,7 +184,7 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
 
   return (
     <div className="hub-page" data-hub-step="new">
-      <div className="hub-line flex h-[35px] shrink-0 items-center gap-2 border-b hub-fs-13">
+      <div className="hub-line flex h-[35px] shrink-0 items-center justify-center gap-2 border-b hub-fs-13">
         <button type="button" onClick={onBack} className="hub-muted flex items-center gap-1" data-hub-back>
           <ChevronLeft size={13} />Characters
         </button>
@@ -172,7 +192,9 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
         <span className="hub-text font-medium">New character</span>
       </div>
 
-      <div className="hub-new scrollbar-thin">
+      <div className="hub-new-scroll">
+      <div className="hub-center">
+      <div className="hub-new">
         <div className="min-w-0">
           <div className="mb-2 flex items-baseline justify-between">
             <h2 className="hub-dim hub-fs-10">{lora ? 'LoRA file' : 'Photos of the face'}</h2>
@@ -214,7 +236,7 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
           </div>
 
           {photos.length > 0 && (
-            <ul className="mt-3.5 flex flex-wrap gap-2" aria-label="Photos of the new character" data-hub-photos={photos.length}>
+            <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Photos of the new character" data-hub-photos={photos.length}>
               {photos.map((f, i) => (
                 <li key={`${f.name}-${i}`} className="relative">
                   {urls[i] && <img src={urls[i]} alt="" className="hub-thumb" />}
@@ -242,7 +264,8 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
             </div>
           )}
 
-          {!lora && (
+          {/* The tips are for choosing photos: once they are here, the photos take the room. */}
+          {!lora && photos.length === 0 && (
             <div className="hub-line mt-5 grid grid-cols-2 gap-6 border-t pt-3.5 hub-fs-13">
               <ul className="hub-muted space-y-1">
                 <li className="hub-text mb-1.5 flex items-center gap-1.5 font-medium"><Check size={13} className="text-emerald-500 dark:text-emerald-300" />Good</li>
@@ -255,7 +278,7 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
             </div>
           )}
 
-          {desktop && folder && (
+          {desktop && folder && photos.length === 0 && (
             <div className="hub-line mt-4 border-t pt-3.5 hub-fs-13" data-hub-lora-folder={folder.status}>
               {folder.status === 'ok' ? (
                 <>
@@ -317,19 +340,20 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
                   line={`Best likeness in new pictures. Needs at least ${MIN_TRAIN_IMAGES} photos, 10 or more work better. It takes a while, on this computer or for credits on LU Cloud. The next page sets it up.`}
                 />
               </div>
-              <h2 className="hub-dim mb-1 mt-6 hub-fs-10">After saving</h2>
-              <div className="hub-line flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-y hub-fs-13">
-                {HUB_ACTIONS.map((a) => (
-                  <span key={a} className="hub-text inline-flex items-center gap-1.5"><span className="hub-muted">{ACTION_ICON[a]}</span>{ACTION_LABEL[a]}</span>
-                ))}
-                <span className="hub-dim ml-auto hub-fs-125">{way === 'train' ? 'ready after the training' : 'ready right away'}</span>
+              <div className="hub-after" data-hub-after>
+                <p className="hub-dim hub-fs-125">{way === 'train' ? 'After the training' : 'After saving, right away'}</p>
+                <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 hub-fs-13">
+                  {HUB_ACTIONS.map((a) => (
+                    <span key={a} className="hub-text inline-flex items-center gap-1.5"><span className="hub-muted">{ACTION_ICON[a]}</span>{ACTION_LABEL[a]}</span>
+                  ))}
+                </p>
               </div>
             </>
           )}
         </div>
       </div>
 
-      <div className="shrink-0 pb-3 pt-2">
+      <div className="pb-3 pt-2">
         {(error || added) && (
           <p role={error ? 'alert' : 'status'} className={cn('pb-2 hub-fs-125', error ? 'text-red-500 dark:text-red-400' : 'hub-muted')} data-hub-new-message>
             {error ?? `${clean} is in your LoRA folder. ${added?.note}`}
@@ -346,6 +370,8 @@ export function HubNewCharacter({ onBack, onSaved, onOpenGallery }: Props) {
             <Button variant="primary" size="md" disabled={added ? false : !ready} onClick={() => { if (added) onSaved(added.character); else void save() }}>{button}</Button>
           </span>
         </div>
+      </div>
+      </div>
       </div>
     </div>
   )

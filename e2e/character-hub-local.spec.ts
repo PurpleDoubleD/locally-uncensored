@@ -1,9 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
-import { readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
-import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
-import { seedOnboardingDone } from './support/cloud-mock'
-import { gradientPng } from './support/png'
+import { writeFileSync } from 'fs'
+import { ANIMATE, LORA, PNG, bootLocal, type Graph } from './support/character-local'
 import { openCharacterHub } from './support/character-hub'
 
 /**
@@ -19,89 +16,7 @@ import { openCharacterHub } from './support/character-hub'
  * LU_SHOTS=<folder> writes the screens (dark and light) and the graphs there.
  */
 
-const ZIMAGE = 'z_image_turbo_bf16.safetensors'
-const ANIMATE = 'Wan2.2-Animate-14B-Q4_K_M.gguf'
-const S2V = 'Wan2.2-S2V-14B-Q4_K_M.gguf'
-const LORA = 'char_opa_zimage.safetensors'
 const SHOTS = process.env.LU_SHOTS
-const PNG = gradientPng(512, 768)
-
-type Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>
-
-/** The app's own object_info fixture, and every node the builders name (a
- *  recent ComfyUI with the packs LU installs for these lanes). */
-const OBJECT_INFO = {
-  ...Object.fromEntries(['ADE_ApplyAnimateDiffModelSimple','ADE_LoadAnimateDiffModel','ADE_UseEvolvedSampling','ApplyTextureToMesh','AudioEncoderEncode','AudioEncoderLoader','BakeAmbientOcclusion','BakeNormalMapFromMesh','BakeTextureFromVoxel','BasicGuider','BasicScheduler','BlockSparseAttention','CFGGuider','CFGNorm','CFGOverride','CLIPLoader','CLIPSetLastLayer','CLIPTextEncode','CLIPVisionEncode','CLIPVisionLoader','CheckpointLoaderSimple','ConditioningZeroOut','CreateVideo','DWPreprocessor','DecimateMesh','DualCFGGuider','DualCLIPLoader','EmptyImage','EmptyLTXVLatentVideo','EmptyLatentImage','EmptyTrellis2LatentStructure','EmptyYuE2LatentAudio','FluxKontextImageScale','FluxKontextMultiReferenceLatentMethod','FramePackSampler','GetVideoComponents','GrowMask','ImageCompositeMasked','ImageCropToMask','ImageOnlyCheckpointLoader','ImageScale','ImageScaleBy','ImageScaleToTotalPixels','ImageToMask','ImageUpscaleWithModel','InpaintModelConditioning','KSampler','KSamplerAdvanced','KSamplerSelect','LoadAudio','LoadBackgroundRemovalModel','LoadFramePackModel','LoadImage','LoadImageMask','LoadVideo','LoraLoader','LoraLoaderModelOnly','ManualSigmas','MaskComposite','MeshSmoothNormals','MiniMaxH3SigmaShift','ModelSamplingAuraFlow','ModelSamplingFlux','ModelSamplingSD3','QuadrupleCLIPLoader','QwenImage21Cache','RMBG','RandomNoise','ReferenceLatent','RemeshMesh','RemoveBackground','RescaleCFG','SVD_img2vid_Conditioning','SamplerCustomAdvanced','SaveAudioMP3','SaveGLB','SaveImage','SaveVideo','TextEncodeQwenImage21','TextEncodeQwenImageEditPlus','ThresholdMask','Trellis2Conditioning','Trellis2ShapeStage','Trellis2TextureStage','Trellis2UpsampleStage','TrimVideoLatent','TripleCLIPLoader','UNETLoader','UnetLoaderGGUF','UnwrapMesh','UpscaleModelLoader','VAEDecode','VAEDecodeAudio','VAEEncode','VAEEncodeForInpaint','VAELoader','VHS_LoadVideo','VaeDecodeShapeTrellis','VaeDecodeStructureTrellis2','VaeDecodeTextureTrellis','VideoLinearCFGGuidance','Wan22ImageToVideoLatent','WanAnimateToVideo','WanSoundImageToVideo','WanVaceToVideo','YuE2GenerateMusic'].map((n) => [n, { input: { required: {} } }])),
-  ...JSON.parse(readFileSync(join(process.cwd(), 'src/api/__tests__/fixtures/comfy-ui/object-info.json'), 'utf8')),
-} as Record<string, unknown>
-
-async function boot(page: Page) {
-  await page.setViewportSize({ width: 1296, height: 900 })
-  await page.addInitScript(tauriMockInit, { assistantReply: DEFAULT_ASSISTANT_REPLY, modelName: DEFAULT_MODEL_NAME, platform: 'windows' as const })
-  await seedOnboardingDone(page)
-  await page.addInitScript(({ zimage, animate, s2v, lora, base }) => {
-    const w = window as unknown as { __PROMPTS__: string[]; __UPLOADS__: string[]; __TAURI_INTERNALS__: { invoke: (c: string, a: { url?: string; method?: string; body?: string; filename?: string }) => Promise<unknown> } }
-    if (!localStorage.getItem('create-store')) {
-      localStorage.setItem('create-store', JSON.stringify({ state: { backend: 'local', imageModel: zimage }, version: 2 }))
-    }
-    w.__PROMPTS__ = []
-    w.__UPLOADS__ = []
-    const bridge = w.__TAURI_INTERNALS__
-    const invoke = bridge.invoke
-    const combo = (v: string[]) => [v]
-    const any = { input: { required: {} } }
-    const nodes: Record<string, unknown> = {
-      ...base,
-      UNETLoader: { input: { required: { unet_name: combo([zimage]), weight_dtype: combo(['default']) } } },
-      UnetLoaderGGUF: { input: { required: { unet_name: combo([animate, s2v]) } } },
-      CLIPLoader: { input: { required: { clip_name: combo(['qwen_3_4b.safetensors', 'umt5_xxl_fp8_e4m3fn_scaled.safetensors']), type: combo(['lumina2', 'wan', 'qwen_image', 'stable_diffusion']), device: combo(['default']) } } },
-      VAELoader: { input: { required: { vae_name: combo(['ae.safetensors', 'wan_2.1_vae.safetensors']) } } },
-      AudioEncoderLoader: { input: { required: { audio_encoder_name: combo(['wav2vec2_large_english_fp16.safetensors']) } } },
-      LoraLoader: { input: { required: { model: ['MODEL'], clip: ['CLIP'], lora_name: combo([lora]), strength_model: ['FLOAT', { default: 1 }], strength_clip: ['FLOAT', { default: 1 }] } } },
-      LoraLoaderModelOnly: { input: { required: { model: ['MODEL'], lora_name: combo([lora]), strength_model: ['FLOAT', { default: 1 }] } } },
-      KSampler: { input: { required: { model: ['MODEL'], seed: ['INT'], steps: ['INT'], cfg: ['FLOAT'], sampler_name: combo(['euler', 'res_multistep']), scheduler: combo(['simple']), positive: ['CONDITIONING'], negative: ['CONDITIONING'], latent_image: ['LATENT'], denoise: ['FLOAT', { default: 1 }] } } },
-      ImageScale: { input: { required: { image: ['IMAGE'], upscale_method: combo(['nearest-exact', 'lanczos']), width: ['INT'], height: ['INT'], crop: combo(['disabled', 'center']) } } },
-      LoadImage: { input: { required: { image: combo(['source.png']) } } },
-      DWPreprocessor: any, WanAnimateToVideo: any, WanSoundImageToVideo: any, TrimVideoLatent: any,
-      LoadVideo: any, GetVideoComponents: any, CreateVideo: any, SaveVideo: any, VHS_LoadVideo: any, VHS_VideoCombine: any,
-      LoadAudio: any, AudioEncoderEncode: any, ModelSamplingSD3: any, ModelSamplingAuraFlow: any,
-      ImageToMask: any, MaskComposite: any, ThresholdMask: any, GrowMask: any, EmptyImage: any, ImageCompositeMasked: any,
-      CLIPTextEncode: any, EmptySD3LatentImage: any, EmptyLatentImage: any, VAEDecode: any, VAEDecodeTiled: any, SaveImage: any,
-      ConditioningZeroOut: any,
-    }
-    bridge.invoke = (command, args) => {
-      if (command === 'sniff_model_files') return Promise.resolve([])
-      if (command === 'detect_gpus') return Promise.resolve([{ index: 0, vendor: 'nvidia', name: 'RTX 3060', memory_mib: 12288, source: 'e2e' }])
-      if (command === 'comfy_upload_image') {
-        w.__UPLOADS__.push(String(args?.filename))
-        return Promise.resolve(JSON.stringify({ name: String(args?.filename), subfolder: '', type: 'input' }))
-      }
-      if (command !== 'proxy_localhost' || !args?.url?.includes(':8188')) return invoke(command, args)
-      const url = args.url
-      if (url.includes('/system_stats')) return Promise.resolve(JSON.stringify({ devices: [{ name: 'RTX 3060', type: 'cuda', vram_total: 12 * 1024 ** 3 }] }))
-      if (url.endsWith('/prompt') && args.method === 'POST') {
-        w.__PROMPTS__.push(String(args.body))
-        return Promise.resolve(JSON.stringify({ prompt_id: `p${w.__PROMPTS__.length}`, number: 1, node_errors: {} }))
-      }
-      const hist = /\/history\/(p\d+)/.exec(url)
-      if (hist) {
-        const images = [{ filename: `local_${hist[1]}.png`, subfolder: '', type: 'output' }]
-        return Promise.resolve(JSON.stringify({ [hist[1]]: { status: { status_str: 'success', completed: true, messages: [] }, outputs: { '99': { images } } } }))
-      }
-      if (url.includes('/queue')) return Promise.resolve(JSON.stringify({ queue_running: [], queue_pending: [] }))
-      const one = /\/object_info\/([^/?]+)/.exec(url)
-      if (one) {
-        const type = decodeURIComponent(one[1])
-        return Promise.resolve(JSON.stringify(type in nodes ? { [type]: nodes[type] } : {}))
-      }
-      if (url.includes('/object_info')) return Promise.resolve(JSON.stringify(nodes))
-      return Promise.resolve('{}')
-    }
-  }, { zimage: ZIMAGE, animate: ANIMATE, s2v: S2V, lora: LORA, base: OBJECT_INFO })
-  await page.route(/:8188\/view/, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: PNG }))
-  await page.goto('/')
-  await page.getByRole('button', { name: /^Create$/ }).click()
-}
 
 const posted = (page: Page) => page.evaluate(() => (window as unknown as { __PROMPTS__: string[] }).__PROMPTS__.map((p) => (JSON.parse(p) as { prompt: unknown }).prompt)) as Promise<Graph[]>
 const types = (g: Graph) => Object.values(g).map((n) => n.class_type)
@@ -187,7 +102,7 @@ async function clickable(page: Page, selector: string) {
 
 test('local mode, Windows: the old local character is there, and Image, Swap, Motion and Talk all start on this computer', async ({ page }) => {
   test.setTimeout(120_000)
-  await boot(page)
+  await bootLocal(page)
   await openCharacterHub(page)
   // The char_* LoRA of this machine is a character of the area, as before.
   const opa = page.locator(`[data-hub-character="local:${LORA}"]`)

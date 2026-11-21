@@ -698,7 +698,7 @@ export function useCreate() {
       const st = await getMacTrainStatus().catch(() => null)
       const missing = st && (st.memoryRefusal ?? macTrainMissing(st))
       if (missing) {
-        setError(st.memoryRefusal ?? `${missing} Install it in the Model Manager, then hit Create again.`)
+        setError(st.memoryRefusal ?? `${missing} Install it in the Model Manager, then start the training again.`)
         return
       }
     }

@@ -76,6 +76,7 @@ export function AdvancedDrawer({
   // is picked for THAT model (useCreate runs it in place of LU's graph).
   const localOpModel = useCreateStore((state) => state.localOpModel)
   const motionModels = useCreateStore((state) => state.motionModelList)
+  const hubPhotoImage = useCreateStore((state) => !!state.hubPhotoImage)
 
   const modelName =
     intent === 'motion'
@@ -97,7 +98,7 @@ export function AdvancedDrawer({
     >
       {/* The Character tab keeps its model, size and prompt helpers here:
           its prompt window holds only the field, the upload and Create. */}
-      {open && isHubIntent(intent) && <HubSettings onOpenWorkflows={onOpenWorkflows} />}
+      {open && (isHubIntent(intent) || hubPhotoImage) && <HubSettings onOpenWorkflows={onOpenWorkflows} />}
       {/* Scene to Video: Look and Style at the head (the web's last rows of
           its settings; here the drawer is the settings). */}
       {open && intent === 'scene' && <SceneSettings />}
