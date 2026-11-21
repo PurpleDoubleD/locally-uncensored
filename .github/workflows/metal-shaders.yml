@@ -45,7 +45,7 @@ jobs:
         # 'macos-14-arm64-us-default' is not supported", 19.11.2026), so
         # macos-15 is the oldest compiler this workflow can ask. For 14 the
         # evidence is upstream: llama.cpp #31272 (M2 Ultra, macOS 14),
-        # confirmed fixed by PR 31360, the change patch 0005 carries.
+        # confirmed fixed by PR 31360, part of the pin since b12608.
         runner: [macos-15]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30

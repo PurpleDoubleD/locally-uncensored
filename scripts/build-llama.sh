@@ -52,8 +52,8 @@ set -euo pipefail
 # CI reuses a cached checkout keyed on hashFiles('scripts/build-llama.sh')
 # (release.yml, sidecar-windows.yml), so both values below are inside the cache
 # key by construction — bumping one cannot silently reuse the old source tree.
-LLAMA_TAG="${LLAMA_TAG:-b11960}"
-LLAMA_COMMIT="${LLAMA_COMMIT:-8642541b255bfb5dc39cd351a178be09013a55d6}"
+LLAMA_TAG="${LLAMA_TAG:-b12608}"
+LLAMA_COMMIT="${LLAMA_COMMIT:-93cb37ea7b5f134cc500b1c5b91d971190600a1a}"
 LLAMA_REPO="${LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 
 # --- Paths -----------------------------------------------------------------
@@ -342,11 +342,9 @@ ensure_src() {
 
 # LU's own changes to the pinned source, reviewed in this repo
 # (scripts/llama-patches/*.patch). 0001-0004 only touch
-# tools/cvector-generator. 0005 (A40, 3.1.2) is upstream llama.cpp PR 31360
-# backported: two `constexpr` words out of ggml-metal/kernels/unary.metal, so
-# the embedded Metal library compiles on macOS 14 and 15 again. Drop it once
-# LLAMA_COMMIT is at or past c9daee1. Everything else in the server binary is
-# the pinned source unchanged.
+# tools/cvector-generator. The Metal fix for macOS 14 and 15 (A40, upstream PR
+# 31360, c9daee1) is part of the pinned commit since b12608, so its backport
+# is gone. Everything else in the server binary is the pinned source unchanged.
 #
 # P11 FEHLER 10 (David's test build, 31.10.2026): the vector tool aborted
 # on Qwen3.5 (GGML_ASSERT diff_filtered.size() == n_layers - 1): b9949 keeps
