@@ -887,9 +887,65 @@ pub(crate) fn amd_rocm_served(amd_names: &[&str], os: &str) -> bool {
     }
 }
 
+/// A Windows machine whose only candidate for rendering is an AMD card LU
+/// installs no GPU build of PyTorch for, an RX 6800 for example. Repair lands on
+/// the same processor wheels there, so no message may offer it as the way out.
+/// NVIDIA and Intel Arc have their own builds, so a Radeon iGPU beside them
+/// does not count.
+pub(crate) fn amd_left_on_processor(
+    has_nvidia: bool,
+    amd_names: &[&str],
+    intel_names: &[&str],
+    os: &str,
+) -> bool {
+    os == "windows"
+        && !has_nvidia
+        && !amd_names.is_empty()
+        && !amd_rocm_served(amd_names, os)
+        && !intel_names.iter().any(|n| is_intel_arc(n))
+}
+
+/// `amd_left_on_processor` for this machine, from the hardware probe.
+pub(crate) fn this_machine_amd_left_on_processor() -> bool {
+    if std::env::consts::OS != "windows" {
+        return false;
+    }
+    let (has_nvidia, _, amd_names) = gpu_vendor_facts();
+    let amd_refs: Vec<&str> = amd_names.iter().map(String::as_str).collect();
+    let intel = intel_gpu_names();
+    let intel_refs: Vec<&str> = intel.iter().map(String::as_str).collect();
+    amd_left_on_processor(has_nvidia, &amd_refs, &intel_refs, std::env::consts::OS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_rx_6800_on_windows_is_named_as_left_on_the_processor() {
+        let rx6800 = ["AMD Radeon RX 6800"];
+        assert!(matches!(
+            comfy_wheel_plan(false, None, true, &rx6800, "windows"),
+            WheelPlan::Cpu { .. }
+        ));
+        assert!(amd_left_on_processor(false, &rx6800, &[], "windows"));
+        // Linux has ROCm wheels for gfx1030, so nothing is left behind there.
+        assert!(matches!(
+            comfy_wheel_plan(false, None, true, &rx6800, "linux"),
+            WheelPlan::Index { .. }
+        ));
+        assert!(!amd_left_on_processor(false, &rx6800, &[], "linux"));
+    }
+
+    #[test]
+    fn only_a_card_without_any_gpu_build_counts_as_left_on_the_processor() {
+        let served = ["AMD Radeon RX 7900 XTX"];
+        let igpu = ["AMD Radeon(TM) Graphics"];
+        assert!(!amd_left_on_processor(false, &served, &[], "windows"));
+        assert!(!amd_left_on_processor(true, &igpu, &[], "windows"), "NVIDIA renders");
+        assert!(!amd_left_on_processor(false, &igpu, &["Intel(R) Arc(TM) B580"], "windows"), "Arc renders");
+        assert!(!amd_left_on_processor(false, &[], &[], "windows"), "no AMD card");
+    }
 
     #[test]
     fn an_amd_linux_box_gets_rocm_wheels_not_processor_wheels() {

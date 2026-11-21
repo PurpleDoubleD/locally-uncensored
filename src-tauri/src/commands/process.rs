@@ -536,8 +536,10 @@ pub(crate) fn force_gpu_warning_for(
             "Your card is AMD, and this ComfyUI environment holds processor wheels: \
              pytorch.org publishes no Windows ROCm wheels, and AMD's own Windows ROCm \
              index either does not cover this card or did not answer when the \
-             environment was built. Use a ComfyUI of your own on ZLUDA or DirectML, or \
-             set ComfyUI GPU back to Auto and render on the processor."
+             environment was built. A ZLUDA custom node inside this environment cannot \
+             change that, because processor wheels have no CUDA for it to serve. Use a \
+             ComfyUI of your own on ZLUDA or DirectML, or set ComfyUI GPU back to Auto and \
+             render on the processor."
         }
         _ => {
             "Reinstall the ComfyUI environment from Settings > ComfyUI (Repair environment) \
@@ -565,13 +567,37 @@ pub(crate) fn force_gpu_warning_for(
 /// rocm-smi und lspci los, und der Start von ComfyUI ist genau der Moment, in
 /// dem der Nutzer wartet. Der Grund laesst sich ohne den Hersteller genau
 /// benennen, und der Weg zur AMD-Antwort steht im Band, das ohnehin erscheint.
+// Only the tests read it, the app asks `cpu_flag_reason_for`.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn cpu_flag_reason(
     mode: ComfyGpuMode,
     baseline_needs_cpu: bool,
     torch_gpu: Option<bool>,
 ) -> Option<String> {
+    cpu_flag_reason_for(mode, baseline_needs_cpu, torch_gpu, || false)
+}
+
+/// `cpu_flag_reason`, told whether this is a Windows AMD card LU has no GPU
+/// build for. A closure, so the hardware probe only runs on the one path whose
+/// sentence depends on it: Auto, and a torch that reports no card.
+pub(crate) fn cpu_flag_reason_for(
+    mode: ComfyGpuMode,
+    baseline_needs_cpu: bool,
+    torch_gpu: Option<bool>,
+    amd_left_on_processor: impl FnOnce() -> bool,
+) -> Option<String> {
     if !decide_comfy_cpu_flag(mode, baseline_needs_cpu, torch_gpu) {
         return None;
+    }
+    if mode == ComfyGpuMode::Auto && torch_gpu == Some(false) && amd_left_on_processor() {
+        return Some(
+            "LU has no GPU build of PyTorch for this AMD card on Windows, so ComfyUI starts \
+             with --cpu. Repair environment would install the same processor build. A ZLUDA \
+             custom node inside this environment cannot change that. To use the card, point \
+             LU at a ComfyUI of your own that is set up for ZLUDA and set Settings > Hardware \
+             > ComfyUI GPU to Force GPU."
+                .to_string(),
+        );
     }
     Some(match mode {
         ComfyGpuMode::ForceCpu => "ComfyUI GPU is set to Force CPU, so ComfyUI starts with --cpu. \
@@ -2206,7 +2232,12 @@ pub(crate) fn start_comfyui_blocking(state: &AppState) -> Result<serde_json::Val
     let mut device_flag: Option<&'static str> = None;
     if needs_cpu_fallback {
         comfy_args.push("--cpu");
-        if let Some(reason) = cpu_flag_reason(gpu_mode, cpu_decision.baseline, cpu_decision.torch_gpu) {
+        if let Some(reason) = cpu_flag_reason_for(
+            gpu_mode,
+            cpu_decision.baseline,
+            cpu_decision.torch_gpu,
+            crate::commands::torch_wheels::this_machine_amd_left_on_processor,
+        ) {
             println!("[ComfyUI] {reason}");
         }
     } else if let Some(flag) =
@@ -3109,7 +3140,8 @@ pub fn get_comfy_gpu_status(state: State<'_, AppState>) -> Result<serde_json::Va
     let (_, has_amd, amd_names) = crate::commands::torch_wheels::gpu_vendor_facts();
     let amd_refs: Vec<&str> = amd_names.iter().map(String::as_str).collect();
     let amd_rocm = crate::commands::torch_wheels::amd_rocm_served(&amd_refs, std::env::consts::OS);
-    Ok(serde_json::json!({ "mode": mode, "startedCpu": started_cpu, "hasAmd": has_amd, "amdRocmServed": amd_rocm }))
+    let amd_no_gpu_build = crate::commands::torch_wheels::this_machine_amd_left_on_processor();
+    Ok(serde_json::json!({ "mode": mode, "startedCpu": started_cpu, "hasAmd": has_amd, "amdRocmServed": amd_rocm, "amdNoGpuBuild": amd_no_gpu_build }))
 }
 
 /// What LU installs into a ComfyUI environment on THIS machine, for the line
@@ -3736,7 +3768,12 @@ pub fn auto_start_comfyui(state: &AppState) {
             let mut auto_device_flag: Option<&'static str> = None;
             if auto_needs_cpu {
                 comfy_args.push("--cpu");
-                if let Some(reason) = cpu_flag_reason(auto_gpu_mode, auto_decision.baseline, auto_decision.torch_gpu) {
+                if let Some(reason) = cpu_flag_reason_for(
+                    auto_gpu_mode,
+                    auto_decision.baseline,
+                    auto_decision.torch_gpu,
+                    crate::commands::torch_wheels::this_machine_amd_left_on_processor,
+                ) {
                     println!("[ComfyUI] Auto-start: {reason}");
                 }
             } else if let Some(flag) = comfy_launch_device_flag(
@@ -4877,6 +4914,21 @@ mod tests {
             .expect("Force CPU heisst immer --cpu");
         assert!(gewollt.contains("Force CPU"), "{gewollt}");
         assert!(gewollt.contains("Auto"), "der Weg raus fehlt: {gewollt}");
+    }
+
+    #[test]
+    fn an_amd_card_without_a_gpu_build_is_not_sent_to_repair() {
+        let msg = cpu_flag_reason_for(ComfyGpuMode::Auto, true, Some(false), || true).unwrap();
+        assert!(msg.contains("no GPU build of PyTorch for this AMD card"), "{msg}");
+        assert!(msg.contains("Repair environment would install the same processor build"), "{msg}");
+        assert!(msg.contains("ZLUDA custom node"), "{msg}");
+        assert!(!msg.contains("Reinstall"), "{msg}");
+
+        // The other reasons keep their own sentence, and need no hardware probe.
+        for (mode, torch) in [(ComfyGpuMode::ForceCpu, Some(false)), (ComfyGpuMode::Auto, None)] {
+            let other = cpu_flag_reason_for(mode, true, torch, || panic!("probe not needed")).unwrap();
+            assert!(!other.contains("no GPU build"), "{other}");
+        }
     }
 
     #[test]
