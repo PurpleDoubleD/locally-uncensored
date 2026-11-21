@@ -353,7 +353,7 @@ describe.each(QWEN21_WEIGHTS)('buildDynamicWorkflow, Qwen-Image 2.1 edit (one re
   // keep holding rather than letting a painted mask fall on the floor.
   it('a painted mask is refused, not dropped', async () => {
     await expect(buildDynamicWorkflow({ ...editParams, maskImage: 'lu_mask.png' } as never))
-      .rejects.toThrow(/Local image editing needs an SD 1.5 \/ SDXL checkpoint/)
+      .rejects.toThrow(/Local image editing with a mask needs Z Image or an SD 1.5 \/ SDXL checkpoint/)
   })
 })
 

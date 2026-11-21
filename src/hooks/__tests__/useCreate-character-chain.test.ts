@@ -90,7 +90,6 @@ import { useCreate } from '../useCreate'
 import { useCreateStore } from '../../stores/createStore'
 import { classifyModel } from '../../api/comfyui'
 import { CHAIN_STEP_IMAGE, CHAIN_STEP_VIDEO } from '../../lib/characters'
-import { EDIT_MASK_NO_CHARACTER } from '../../lib/character-run'
 import type { CreateIntent } from '../../stores/createStore'
 
 const CHAR = 'char_mira_zimage.safetensors'
@@ -295,11 +294,13 @@ describe('the character in Image and Edit', () => {
     expect(useCreateStore.getState().error).toBe('This character was trained for Z Image. Pick a Z Image model to use it.')
   })
 
-  it('Edit with a mask says the character needs none', async () => {
+  it('Edit with a mask on Z Image paints the character into the masked area', async () => {
     on('edit', { imageModel: Z_IMAGE, imageModelType: 'zimage', source: SOURCE, mask: { ...SOURCE, filename: 'mask.png' } })
     await run()
-    expect(seen.builds).toEqual([])
-    expect(useCreateStore.getState().error).toBe(EDIT_MASK_NO_CHARACTER)
+    expect(useCreateStore.getState().error).toBeNull()
+    expect(imageBuild()?.inputImage).toBe('mine.png')
+    expect(imageBuild()?.maskImage).toBe('mask.png')
+    expect(imageBuild()?.lora).toEqual(['film_grain.safetensors', CHAR])
   })
 
   it('Edit without a mask edits with the character', async () => {

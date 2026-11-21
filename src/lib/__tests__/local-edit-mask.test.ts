@@ -38,7 +38,7 @@ const base = { intent: 'edit', backend: 'local' as const, mac: false, hasMask: t
 describe('which local models read a mask', () => {
   it('is exactly the types the builder sends down the checkpoint graph', () => {
     for (const type of IMAGE_TYPES) {
-      expect(comfyModelTakesMask(type), type).toBe(determineStrategy(type, false, NODES, MODELS).strategy === 'checkpoint')
+      expect(comfyModelTakesMask(type), type).toBe(['checkpoint', 'unet_zimage'].includes(determineStrategy(type, false, NODES, MODELS).strategy))
     }
   })
 

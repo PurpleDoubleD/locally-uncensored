@@ -133,6 +133,9 @@ const CORE_NODES = new Set([
   // decode + image ops
   // VAEDecodeTiled: core nodes.py; answered /object_info/VAEDecodeTiled live
   // on the 2026-08-02 e2e box (full tile/overlap/temporal signature).
+  // SetLatentNoiseMask (samples, mask): core nodes.py, read in a ComfyUI
+  // checkout on 21.11.2026. The mask of a Z-Image edit.
+  'SetLatentNoiseMask',
   'VAEDecode', 'VAEDecodeTiled', 'VAEDecodeAudio', 'VAEEncode', 'VAEEncodeForInpaint', 'ImageScale',
   'GetVideoComponents', 'CreateVideo',
   // Enhance Image (3.0.7), read in Comfy-Org/ComfyUI master on 2026-10-14:

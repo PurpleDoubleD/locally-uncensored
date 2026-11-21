@@ -752,8 +752,9 @@ export async function buildDynamicWorkflow(
   const fromCheckpoint = strategy !== 'checkpoint' && strategy !== 'animatediff'
     && listedCheckpoints.length > 0 && inCheckpoints && !inUnets
 
-  // Local Edit (mask inpaint) runs on the SDXL/SD1.5 checkpoint pipeline only.
-  // Reject other strategies explicitly instead of silently dropping the mask —
+  // Local Edit (mask inpaint) runs on the SDXL/SD1.5 checkpoint pipeline and
+  // on Z-Image, whose latent takes ComfyUI's core noise mask (Discord
+  // 21.11.2026: a character could not be painted into a picture). Reject other strategies explicitly instead of silently dropping the mask —
   // the pre-2.5.7 behavior was exactly that: a masked edit fell through to
   // plain img2img and repainted the WHOLE image.
   //
@@ -765,9 +766,16 @@ export async function buildDynamicWorkflow(
   // marking drawn into the picture plus a prompt that names it, which is a
   // different surface from the mask editor and is not built in this cut.
   const sdCheckpointFamily = strategy === 'checkpoint' || strategy === 'unet_sdxl' || strategy === 'unet_sd15'
-  if (!isVideo && gp.inputImage && gp.maskImage && !sdCheckpointFamily) {
+  const zimageMask = strategy === 'unet_zimage'
+  if (!isVideo && gp.inputImage && gp.maskImage && !sdCheckpointFamily && !zimageMask) {
     throw new WorkflowUnavailableError(
-      'Local image editing needs an SD 1.5 / SDXL checkpoint. Pick a checkpoint model for Edit. FLUX and video models are not wired for local inpaint.',
+      'Local image editing with a mask needs Z Image or an SD 1.5 / SDXL checkpoint. Pick one of them for Edit. FLUX and video models are not wired for local inpaint.',
+      strategy,
+    )
+  }
+  if (!isVideo && gp.inputImage && gp.maskImage && zimageMask && !allNodes['SetLatentNoiseMask']) {
+    throw new WorkflowUnavailableError(
+      'A mask on Z Image needs the SetLatentNoiseMask node, which your ComfyUI does not have. Update ComfyUI, then try again.',
       strategy,
     )
   }
@@ -1468,7 +1476,7 @@ export async function buildDynamicWorkflow(
   // Takes precedence over plain I2I — a mask means "repaint THIS area", never
   // "repaint everything". Ported 1:1 from the web app's tested builder
   // (create-workflows.ts): same node classes, same defaults.
-  const isInpaint = !isVideo && !!gp.inputImage && !!gp.maskImage && sdCheckpointFamily
+  const isInpaint = !isVideo && !!gp.inputImage && !!gp.maskImage && (sdCheckpointFamily || zimageMask)
   // I2I mode: LoadImage → VAEEncode instead of empty latent. A Qwen-Image 2.1
   // edit is excluded: its reference image is already wired into the text
   // encoder above, and its sampler runs at denoise 1.0 like the official
@@ -1635,7 +1643,29 @@ export async function buildDynamicWorkflow(
       class_type: 'LoadImageMask',
       inputs: { image: gp.maskImage, channel: 'red' },
     }
-    if (allNodes['InpaintModelConditioning']) {
+    if (zimageMask) {
+      // Z-Image has no inpaint model: the source is encoded whole and only
+      // the painted area is sampled. Its edge grows like the other paths.
+      const encId = String(n++)
+      workflow[encId] = {
+        class_type: 'VAEEncode',
+        inputs: { pixels: [loadImageId, 0], vae: [vaeSourceId, vaeOutputSlot] },
+      }
+      let maskRef: [string, number] = [loadMaskId, 0]
+      const grow = gp.growMaskBy ?? 6
+      if (grow > 0 && allNodes['GrowMask']) {
+        const growId = String(n++)
+        workflow[growId] = { class_type: 'GrowMask', inputs: { mask: maskRef, expand: grow, tapered_corners: true } }
+        maskRef = [growId, 0]
+      }
+      const noiseMaskId = String(n++)
+      workflow[noiseMaskId] = {
+        class_type: 'SetLatentNoiseMask',
+        inputs: { samples: [encId, 0], mask: maskRef },
+        _meta: { title: 'Inpaint Z-Image' },
+      }
+      latentRef = [noiseMaskId, 0]
+    } else if (allNodes['InpaintModelConditioning']) {
       const condId = String(n++)
       workflow[condId] = {
         class_type: 'InpaintModelConditioning',
