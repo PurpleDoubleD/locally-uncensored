@@ -14,6 +14,7 @@ import { openExternal } from '../../../api/backend'
 import type { Mesh3dModel } from '../../../api/mlx-3d'
 import { mac3dModel } from '../../../lib/mac-3d'
 import { THREE_D_TEXT as T } from '../../../lib/three/three-d-text'
+import { stageAnswers } from '../../../lib/create/stage-answers'
 import { useCreateStore } from '../../../stores/createStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useCreateExp } from './CreateContext'
@@ -34,6 +35,11 @@ export const SETUP_TEXT = {
   checking: 'Checking for the 3D engine…',
 }
 
+interface ThreeDAnswer {
+  ok: boolean
+  card: Mesh3dModel | null
+}
+
 export interface ThreeDSetup {
   /** null while the check runs. */
   ready: boolean | null
@@ -52,37 +58,54 @@ export interface ThreeDSetup {
 export function useThreeDLocal(active: boolean): ThreeDSetup {
   const mac = isMlxImageHost()
   const macModel = mac3dModel(useCreateStore((s) => s.threeDMacModel)).id
-  const { installModelBundle } = useCreateExp()
-  const [ready, setReady] = useState<boolean | null>(null)
-  const [card, setCard] = useState<Mesh3dModel | null>(null)
+  const { installModelBundle, connected } = useCreateExp()
+  // The answer belongs to the model it was asked for. The last known one
+  // stands while the check runs again, so a visit does not start from nothing.
+  const key = mac ? `3d:mac:${macModel}` : '3d:pc'
+  const [live, setLive] = useState<ThreeDAnswer & { key: string } | null>(null)
+  const known = live?.key === key ? live : stageAnswers.get<ThreeDAnswer>(key)
+  const ready = known?.ok ?? null
+  const card = known?.card ?? null
   const [installing, setInstalling] = useState(false)
   const [line, setLine] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (): Promise<ThreeDAnswer & { sure: boolean }> => {
     try {
       if (mac) {
         const { getMesh3dStatus, mesh3dModelOf } = await import('../../../api/mlx-3d')
         const st = await getMesh3dStatus()
         const model = mesh3dModelOf(st, macModel)
-        setCard(model)
-        return !!model?.installed
+        return { ok: !!model?.installed, card: model, sure: true }
       }
       const { comfyThreeDReady } = await import('../../../lib/local-3d-comfy')
-      return await comfyThreeDReady()
+      // ComfyUI down says nothing about the files: shown, never remembered.
+      return { ok: await comfyThreeDReady(), card: null, sure: connected === true }
     } catch {
-      return false
+      return { ok: false, card: null, sure: false }
     }
-  }, [mac, macModel])
+  }, [mac, macModel, connected])
 
   useEffect(() => {
-    if (!active) return
+    if (!active || (!mac && connected === null)) return
     let alive = true
-    setReady(null)
-    void check().then((ok) => { if (alive) setReady(ok) })
-    return () => { alive = false }
-  }, [active, check])
+    const ask = () => {
+      const ticket = stageAnswers.ticket()
+      void check().then(({ ok, card: model, sure }) => {
+        // A reply overtaken by a model change is not the state after it.
+        if (!alive || ticket !== stageAnswers.ticket()) return
+        if (sure) stageAnswers.answer(key, { ok, card: model }, ticket)
+        setLive({ key, ok, card: model })
+      })
+    }
+    ask()
+    window.addEventListener('comfyui-model-downloaded', ask)
+    return () => {
+      alive = false
+      window.removeEventListener('comfyui-model-downloaded', ask)
+    }
+  }, [active, check, key, mac, connected])
 
   const install = useCallback(() => {
     if (installing) return
@@ -109,7 +132,9 @@ export function useThreeDLocal(active: boolean): ThreeDSetup {
         } else {
           await installModelBundle('3d', (msg) => setLine(msg), controller.signal)
         }
-        setReady(await check())
+        const after = await check()
+        if (after.sure) stageAnswers.set(key, { ok: after.ok, card: after.card })
+        setLive({ key, ok: after.ok, card: after.card })
       } catch (err) {
         if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -118,7 +143,7 @@ export function useThreeDLocal(active: boolean): ThreeDSetup {
         abort.current = null
       }
     })()
-  }, [installing, mac, macModel, check, installModelBundle])
+  }, [installing, mac, macModel, key, check, installModelBundle])
 
   const cancel = useCallback(() => abort.current?.abort(), [])
 
