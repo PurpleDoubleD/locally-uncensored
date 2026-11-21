@@ -18,10 +18,11 @@ import { isRecord, asString, asRecordArray } from '../types/json-guards'
 // getKnownFileSizes() herein, „to break the cycle at runtime". Die
 // Bundle-Daten gehören weder hierher noch nach discover.ts — sie liegen
 // jetzt in model-bundles.ts, das beide Seiten statisch lesen.
-import { getImageBundles, getVideoBundles } from './model-bundles'
+import { getImageBundles, getVideoBundles, getRetiredBundles } from './model-bundles'
 import { isQwenEnhancerFile } from '../lib/render/qwen-enhancer'
 import { pickQwenEncoder, qwenEncoderFile, type QwenEncoderChoice } from '../lib/render/qwen-text-encoder'
 import { COMPONENT_REGISTRY, type ComponentSpec } from './component-registry'
+import { RETIRED_MODEL_LINE, isRetiredModelName } from '../lib/retired-models'
 
 // ─── Control-plane fetch timeouts ───
 //
@@ -1183,7 +1184,7 @@ let _knownFileSizes: Map<string, { subfolder: string; expectedBytes: number }> |
 async function getKnownFileSizes(): Promise<Map<string, { subfolder: string; expectedBytes: number }>> {
   if (_knownFileSizes) return _knownFileSizes
   _knownFileSizes = new Map()
-  for (const bundle of [...getImageBundles(), ...getVideoBundles()]) {
+  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getRetiredBundles()]) {
     for (const f of bundle.files) {
       if (f.filename && f.sizeGB && f.subfolder) {
         _knownFileSizes.set(f.filename, {
@@ -1928,7 +1929,14 @@ function isMinimaxEncoder(name: string): boolean {
 
 /** An empty ComfyUI list still names the file this family needs, so Create
  *  can offer it as a download instead of "a VAE for your model type". */
+function retiredFileMissing(what: string, file: string): Error {
+  return new Error(`MiniMax H3 needs its ${what} "${file}", and it is not in ComfyUI. ${RETIRED_MODEL_LINE}`)
+}
+
 function nothingInstalled(kind: 'VAE' | 'text encoder', specs: (ComponentSpec | undefined)[]): Error {
+  // MiniMax H3 is no longer offered: the file is named, no source is.
+  const retired = specs.find((x) => isRetiredModelName(x?.downloadFilename))
+  if (retired) return retiredFileMissing(`${kind}`, retired.downloadFilename)
   const files = specs.filter((x): x is ComponentSpec => !!x).map((x) => `"${x.downloadFilename}"`)
   if (files.length === 0) return new Error(`No ${kind} models found. Download a ${kind} for your model type from the Model Manager.`)
   return new Error(`No ${kind} models found. Download ${files.join(' and ')} from the Model Manager.`)
@@ -2034,10 +2042,7 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     // different latent and is never taken for it.
     const match = vaes.find(v => isMinimaxH3ImageName(v) && lower(v).includes('vae'))
     if (match) return match
-    // The Model Manager does not list H3 Image while its licence question is
-    // open (3.1.3 integration), so the hint names the official source instead.
-    // Back to "from the Model Manager" when the bundle (87a9f37ba) goes in.
-    throw new Error(`No MiniMax H3 Image VAE found. Put "minimax_h3_image_vae_fp16.safetensors" from Comfy-Org/MiniMax-H3-Image on Hugging Face into ComfyUI's models/vae folder.`)
+    throw retiredFileMissing('image VAE', 'minimax_h3_image_vae_fp16.safetensors')
   }
   if (modelType === 'minimaxh3') {
     // The VIDEO autoencoder; the audio one is a second file of its own
@@ -2045,7 +2050,7 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     const match = vaes.find(v => lower(v).includes('minimax_h3_video_vae'))
       || vaes.find(v => lower(v).includes('minimax') && lower(v).includes('video'))
     if (match) return match
-    throw new Error(`No MiniMax H3 video VAE found. Download "minimax_h3_video_vae_int8_convrot.safetensors" from the Model Manager.`)
+    throw retiredFileMissing('video VAE', 'minimax_h3_video_vae_int8_convrot.safetensors')
   }
   if (modelType === 'mochi') {
     const match = vaes.find(v => lower(v).includes('mochi'))
@@ -2141,7 +2146,7 @@ export async function findMiniMaxAudioVAE(): Promise<string> {
   const match = vaes.find(v => v.toLowerCase().includes('minimax_h3_audio_vae'))
     || vaes.find(v => v.toLowerCase().includes('minimax') && v.toLowerCase().includes('audio'))
   if (match) return match
-  throw new Error(`No MiniMax H3 audio VAE found. Download "minimax_h3_audio_vae_fp32.safetensors" from the Model Manager.`)
+  throw retiredFileMissing('audio VAE', 'minimax_h3_audio_vae_fp32.safetensors')
 }
 
 /**
@@ -2270,7 +2275,7 @@ export async function findMatchingCLIP(modelType: ModelType, activeModelName?: s
       || clips.find(c => h3Encoder(c) && lower(c).includes('qwen3vl'))
       || clips.find(c => h3Encoder(c))
     if (match) return match
-    throw new Error(`No MiniMax H3 text encoder found. Download "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" from the Model Manager.`)
+    throw retiredFileMissing('text encoder', 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
   }
   if (modelType === 'mochi') {
     const match = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5') && !lower(c).includes('oldt5'))

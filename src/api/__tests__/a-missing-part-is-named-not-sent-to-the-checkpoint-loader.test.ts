@@ -68,20 +68,24 @@ beforeEach(() => {
 })
 
 describe('a wrapper family with a missing file', () => {
-  it('MiniMax H3 without its audio VAE says so and offers that one file', async () => {
+  // 3.1.3: MiniMax H3 is no longer offered. A missing file is named, nothing
+  // is fetched and no source is given (lib/retired-models).
+  it('MiniMax H3 without its audio VAE says so and offers no download', async () => {
     serveEnums([VIDEO_VAE], [ENCODER])
     const err = await buildDynamicWorkflow(run, 'minimaxh3').catch((e) => e)
     expect(err).toBeInstanceOf(WorkflowUnavailableError)
     expect(err.message).toContain(AUDIO_VAE)
-    expect(err.missing.map((m: { downloadFilename: string }) => m.downloadFilename)).toEqual([AUDIO_VAE])
-    expect(err.missing[0].downloadUrl).toMatch(/Comfy-Org\/MiniMax-H3\/resolve\/main\/vae\//)
+    expect(err.missing ?? []).toEqual([])
+    expect(err.message).not.toMatch(/huggingface|Comfy-Org|Model Manager/i)
   })
 
-  it('MiniMax H3 without its 32B encoder offers the encoder', async () => {
+  it('MiniMax H3 without its 32B encoder names it and offers no download', async () => {
     serveEnums([VIDEO_VAE, AUDIO_VAE], [])
     const err = await buildDynamicWorkflow(run, 'minimaxh3').catch((e) => e)
     expect(err).toBeInstanceOf(WorkflowUnavailableError)
-    expect(err.missing.map((m: { downloadFilename: string }) => m.downloadFilename)).toEqual([ENCODER])
+    expect(err.message).toContain(ENCODER)
+    expect(err.missing ?? []).toEqual([])
+    expect(err.message).not.toMatch(/huggingface|Comfy-Org|Model Manager/i)
   })
 
   // Negative control: with every file there, the same build goes through.

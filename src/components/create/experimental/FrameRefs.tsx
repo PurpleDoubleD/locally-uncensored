@@ -26,7 +26,7 @@ const TILE = 'w-16 h-16 rounded-lg shrink-0'
 /** The cloud line where the Studio model on Animate starts from one image. */
 // A server from before W6 (30.10.2026) has no `end_image` in its catalogue
 // and dropped an end image without a word, so then no cloud model offers one.
-export const CLOUD_END_FRAME_MODELS = 'The LU Cloud video models here start from one image. An end image works on your own ComfyUI with Wan 2.2 14B i2v, Wan 2.1 FLF2V and MiniMax H3.'
+export const CLOUD_END_FRAME_MODELS = 'The LU Cloud video models here start from one image. An end image works on your own ComfyUI with Wan 2.2 14B i2v and Wan 2.1 FLF2V.'
 
 /** The cloud line for a model without an end image: the Animate models that
  *  take one, by name, where the catalogue marks them. */

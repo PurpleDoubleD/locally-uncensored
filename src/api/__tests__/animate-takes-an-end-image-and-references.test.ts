@@ -180,6 +180,6 @@ describe('references on a model that reads one picture', () => {
   it('refuse instead of animating the first one alone', async () => {
     const err = await buildDynamicWorkflow(animate(A14B_HIGH, { referenceImages: ['ref2.png'] })).catch((e) => e)
     expect(err).toBeInstanceOf(WorkflowUnavailableError)
-    expect(err.message).toMatch(/MiniMax H3 Reference/)
+    expect(err.message).toMatch(/cannot take further references/)
   })
 })

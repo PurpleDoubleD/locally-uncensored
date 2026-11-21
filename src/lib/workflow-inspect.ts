@@ -26,6 +26,8 @@
  *          broken or oversized files.
  */
 
+import { RETIRED_MODEL_LINE, isRetiredModelName } from './retired-models'
+
 export type Light = 'green' | 'yellow' | 'red'
 
 export const WORKFLOW_MAX_BYTES = 2 * 1024 * 1024
@@ -391,6 +393,13 @@ export function inspectWorkflow(input: InspectInput): InspectReport {
     const present = options ? Object.values(options).some((list) => list.includes(value)) : false
     if (present) { models.push({ name, state: 'present' }); continue }
 
+    // MiniMax H3 is fetched on no path (lib/retired-models), also not from the
+    // address a workflow declares for it.
+    if (isRetiredModelName(base) || isRetiredModelName(declared.get(base)?.url)) {
+      models.push({ name, state: 'missing', why: RETIRED_MODEL_LINE })
+      flag('yellow', `${name} is missing. ${RETIRED_MODEL_LINE}`)
+      continue
+    }
     const cat = input.catalog(base)
     if (cat) {
       models.push({ name, state: 'catalog', folder: cat.subfolder, sizeGB: cat.sizeGB, ...(cat.sizeBytes ? { bytes: cat.sizeBytes } : {}), host: hostOf(cat.url) ?? undefined, sha256: cat.sha256, url: cat.url })

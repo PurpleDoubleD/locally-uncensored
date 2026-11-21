@@ -79,7 +79,7 @@ describe('der Video-Reiter', () => {
     for (const k of karten) expect(k.best, k.text).toBe(tierVon(k.text) === 'best')
     const best = karten.filter((k) => k.best).map((k) => k.text)
     expect(best).toEqual(expect.arrayContaining([
-      'LTX 2.5 · Video with Sound', 'MiniMax H3 · Start/End Frames, with Sound', 'FastH3 · MiniMax H3 in 8 Steps',
+      'LTX 2.5 · Video with Sound',
     ]))
 
     // Genau eine Zwischenzeile, direkt vor der ersten aelteren Karte.

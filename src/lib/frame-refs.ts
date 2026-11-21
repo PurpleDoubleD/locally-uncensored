@@ -36,7 +36,7 @@ export function localEndFrame(model: string | null | undefined): boolean {
 }
 
 /** The line Animate shows where a local model takes the start image only. */
-export const LOCAL_END_FRAME_MODELS = 'An end image works with Wan 2.2 14B i2v, Wan 2.1 FLF2V and MiniMax H3.'
+export const LOCAL_END_FRAME_MODELS = 'An end image works with Wan 2.2 14B i2v and Wan 2.1 FLF2V.'
 
 /** A long clip is made in sections (B18), and only one clip can end on the
  *  end image. */
@@ -84,7 +84,7 @@ export function createReferenceSupport(type: ModelType | null | undefined, model
 }
 
 /** The honest line where the model on screen takes no reference image. */
-export const CREATE_REFERENCE_MODELS = 'Reference images work with Krea 2 (style), Qwen-Image 2.1, FLUX.2 and MiniMax H3 Image (style, pose, camera angle, people). This model makes the picture from the prompt alone.'
+export const CREATE_REFERENCE_MODELS = 'Reference images work with Krea 2 (style), Qwen-Image 2.1 and FLUX.2 (style, pose, camera angle, people). This model makes the picture from the prompt alone.'
 
 /** The line over the reference tiles. */
 export function createReferenceLine(kind: CreateReferenceKind | undefined, count: number): string {

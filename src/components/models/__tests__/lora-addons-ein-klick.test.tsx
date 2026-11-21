@@ -49,8 +49,8 @@ vi.mock('../../../stores/downloadStore', () => {
 
 import { LoraAddons } from '../LoraAddons'
 
-const TURBO = 'MiniMax H3 Turbo LoRA · 8 Steps'
-const FILE = 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'
+const PIXEL = 'Pixel Art XL · SDXL LoRA'
+const FILE = 'pixel-art-xl.safetensors'
 const tile = (name: string) => document.querySelector(`[data-bundle-tile="${name}"]`) as HTMLElement
 
 beforeEach(() => {
@@ -65,21 +65,22 @@ describe.each(['classic', 'mac'] as const)('Fassung %s', (fassung) => {
   beforeEach(() => { face.name = fassung })
 
   describe('the list', () => {
-    it('shows the H3 turbo LoRA and Pixel Art XL, each with its size', async () => {
+    it('shows the catalogue LoRAs, each with its size', async () => {
       render(<LoraAddons />)
       await waitFor(() => expect(checkBundlesInstalled).toHaveBeenCalled())
       expect(screen.getByText('Ready to install')).toBeTruthy()
-      expect(tile(TURBO)).toBeTruthy()
-      expect(tile('Pixel Art XL · SDXL LoRA')).toBeTruthy()
-      expect(tile(TURBO).textContent).toMatch(/1\.8 GB/)
-      expect(tile(TURBO).textContent).toMatch(/LoRA stack/)
+      expect(tile(PIXEL)).toBeTruthy()
+      expect(tile('Wan 2.1 14B Speed LoRAs · 4 Steps')).toBeTruthy()
+      expect(tile(PIXEL).textContent).toMatch(/162\.6 MB/)
+      // MiniMax H3 is no longer offered (lib/retired-models).
+      expect(tile('MiniMax H3 Turbo LoRA · 8 Steps')).toBeNull()
     })
 
     it('follows the header search and disappears when nothing matches', async () => {
-      const { rerender } = render(<LoraAddons search="turbo" />)
+      const { rerender } = render(<LoraAddons search="pixel" />)
       await waitFor(() => expect(checkBundlesInstalled).toHaveBeenCalled())
-      expect(tile(TURBO)).toBeTruthy()
-      expect(tile('Pixel Art XL · SDXL LoRA')).toBeNull()
+      expect(tile(PIXEL)).toBeTruthy()
+      expect(tile('Wan 2.1 14B Speed LoRAs · 4 Steps')).toBeNull()
       rerender(<LoraAddons search="film grain" />)
       expect(screen.queryByText('Ready to install')).toBeNull()
     })
@@ -89,17 +90,17 @@ describe.each(['classic', 'mac'] as const)('Fassung %s', (fassung) => {
     it('starts the install of exactly that bundle, with folder, size and sha256 on the download row', async () => {
       render(<LoraAddons />)
       await waitFor(() => expect(checkBundlesInstalled).toHaveBeenCalled())
-      fireEvent.click(within(tile(TURBO)).getByRole('button', { name: /Get/ }))
+      fireEvent.click(within(tile(PIXEL)).getByRole('button', { name: /Get/ }))
       await waitFor(() => expect(installBundleComplete).toHaveBeenCalledTimes(1))
-      expect(installBundleComplete.mock.calls[0][0].name).toBe(TURBO)
+      expect(installBundleComplete.mock.calls[0][0].name).toBe(PIXEL)
       expect(store.setMeta).toHaveBeenCalledWith(
         FILE,
-        `https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/${FILE}`,
+        `https://huggingface.co/nerijs/pixel-art-xl/resolve/main/${FILE}`,
         'loras',
         undefined,
-        { expectedBytes: Math.round(1.82 * 1024 ** 3), sha256: '2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e' },
+        { expectedBytes: Math.round(0.1588 * 1024 ** 3), sha256: '4234637cb80c998f41e348e6a6cb6bc20d8d038b2b0f256b6129b3b5e353eef7' },
       )
-      expect(store.setBundleGroup).toHaveBeenCalledWith(TURBO, [FILE])
+      expect(store.setBundleGroup).toHaveBeenCalledWith(PIXEL, [FILE])
       expect(store.startPolling).toHaveBeenCalled()
     })
 
@@ -107,23 +108,23 @@ describe.each(['classic', 'mac'] as const)('Fassung %s', (fassung) => {
       installBundleComplete.mockRejectedValue(new Error('Not enough space on this drive.'))
       render(<LoraAddons />)
       await waitFor(() => expect(checkBundlesInstalled).toHaveBeenCalled())
-      fireEvent.click(within(tile(TURBO)).getByRole('button', { name: /Get/ }))
-      expect(await screen.findByText(`${TURBO}: Not enough space on this drive.`)).toBeTruthy()
+      fireEvent.click(within(tile(PIXEL)).getByRole('button', { name: /Get/ }))
+      expect(await screen.findByText(`${PIXEL}: Not enough space on this drive.`)).toBeTruthy()
     })
   })
 
   describe('the tile states', () => {
     it('Installed when the file is on disk at its size', async () => {
-      checkBundlesInstalled.mockResolvedValue({ [TURBO]: true })
+      checkBundlesInstalled.mockResolvedValue({ [PIXEL]: true })
       render(<LoraAddons />)
-      expect(await within(tile(TURBO)).findByText('Installed')).toBeTruthy()
-      expect(within(tile(TURBO)).queryByRole('button', { name: /Get/ })).toBeNull()
+      expect(await within(tile(PIXEL)).findByText('Installed')).toBeTruthy()
+      expect(within(tile(PIXEL)).queryByRole('button', { name: /Get/ })).toBeNull()
     })
 
     it('Installing while the download runs, and the disk is asked again when it is done', async () => {
       store.downloads = { [FILE]: { status: 'downloading', progress: 1, total: 2 } }
       render(<LoraAddons />)
-      expect(await within(tile(TURBO)).findByText(/Installing/)).toBeTruthy()
+      expect(await within(tile(PIXEL)).findByText(/Installing/)).toBeTruthy()
       const before = checkBundlesInstalled.mock.calls.length
       window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
       await waitFor(() => expect(checkBundlesInstalled.mock.calls.length).toBe(before + 1))
@@ -133,10 +134,10 @@ describe.each(['classic', 'mac'] as const)('Fassung %s', (fassung) => {
       store.downloads = { [FILE]: { status: 'error' } }
       render(<LoraAddons />)
       await waitFor(() => expect(checkBundlesInstalled).toHaveBeenCalled())
-      fireEvent.click(within(tile(TURBO)).getByRole('button', { name: /Retry/ }))
+      fireEvent.click(within(tile(PIXEL)).getByRole('button', { name: /Retry/ }))
       expect(store.retry).toHaveBeenCalledWith(FILE)
       expect(installBundleComplete).not.toHaveBeenCalled()
-      fireEvent.click(within(tile(TURBO)).getByRole('button', { name: /Clear/ }))
+      fireEvent.click(within(tile(PIXEL)).getByRole('button', { name: /Clear/ }))
       expect(store.dismiss).toHaveBeenCalledWith(FILE)
     })
   })

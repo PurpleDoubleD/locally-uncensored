@@ -390,19 +390,19 @@ describe.each(['classic', 'mac'] as const)('Fassung %s', (fassung) => {
       expect(startModelDownload.mock.calls[0][2]).toBe('pixel_art_xl.safetensors')
     })
 
-    // A user asked on 2026-10-03: where does the H3 turbo LoRA come from.
+    // A user asked on 2026-10-03: where does a catalogue LoRA come from.
     it('die Katalog-LoRAs stehen ueber der Suche, ein Klick installiert', async () => {
       render(createElement(ModelManager))
       fireEvent.click(screen.getByRole('button', { name: /^LoRAs/ }))
       fireEvent.click(screen.getByRole('button', { name: /^Get new/ }))
       const liste = await screen.findByTestId('lora-addons')
-      const karte = liste.querySelector('[data-bundle-tile="MiniMax H3 Turbo LoRA · 8 Steps"]') as HTMLElement
+      const karte = liste.querySelector('[data-bundle-tile="Pixel Art XL · SDXL LoRA"]') as HTMLElement
       expect(karte).toBeTruthy()
       // Above the CivitAI card, not below it.
       const suche = screen.getByLabelText('Search CivitAI for LoRAs')
       expect(liste.compareDocumentPosition(suche) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       fireEvent.click(within(karte).getByRole('button', { name: /Get/ }))
-      await waitFor(() => expect(installBundleComplete).toHaveBeenCalledWith('MiniMax H3 Turbo LoRA · 8 Steps'))
+      await waitFor(() => expect(installBundleComplete).toHaveBeenCalledWith('Pixel Art XL · SDXL LoRA'))
     })
   })
 
