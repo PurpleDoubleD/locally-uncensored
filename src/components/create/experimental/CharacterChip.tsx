@@ -133,7 +133,6 @@ export function CharacterNote() {
     hasMask: !!mask,
     imageModelType: imageType,
     baseInstalled: !!base,
-    mac: isMlxImageHost(),
     videoModel: intent === 'video' ? value : '',
     videoLaneEmpty: !isMlxImageHost() && characterVideoLaneEmpty(intent, { video: videoModelList, lipsync: lipsyncModelList, motion: motionModelList }),
   })
@@ -142,7 +141,7 @@ export function CharacterNote() {
     return (
       <p role="alert" data-testid="character-note" className={cn('t-label text-center flex items-center justify-center gap-2 flex-wrap', HINWEIS_TEXT.fehler)}>
         {plan.message}
-        {imageLane && base && !(isMlxImageHost() && intent === 'edit') && (
+        {imageLane && base && !mask && (
           <button onClick={() => setImageModel(base.name, base.type)} className="underline text-gray-300 hover:text-white">
             Switch model
           </button>

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  CHARACTER_EDIT_ON_MAC, CHARACTER_NO_VIDEO_MODEL, characterImagePrompt, characterImageSize, characterRunPlan,
+  CHARACTER_NO_VIDEO_MODEL, EDIT_MASK_NO_CHARACTER, characterImagePrompt, characterImageSize, characterRunPlan,
   characterVideoLaneEmpty, withCharacterLora, withoutCharacterLoras, type CharacterRunInput,
 } from '../character-run'
 import type { ClassifiedModel } from '../../api/comfyui'
@@ -29,12 +29,10 @@ describe('characterRunPlan', () => {
     expect(characterRunPlan({ ...base, intent: 'edit', hasSource: true })).toEqual({ kind: 'image', file: CHAR })
   })
 
-  it('Image on another model: the reason, and a mask on Z Image runs with the character', () => {
+  it('Image on another model, Edit with a mask: the reason', () => {
     expect(characterRunPlan({ ...base, imageModelType: 'sdxl' })).toMatchObject({ kind: 'error', message: expect.stringMatching(/trained for Z Image/) })
     expect(characterRunPlan({ ...base, imageModelType: 'sdxl', baseInstalled: false })).toMatchObject({ message: expect.stringMatching(/no Z Image model is installed/) })
-    expect(characterRunPlan({ ...base, intent: 'edit', hasMask: true })).toMatchObject({ kind: 'image' })
-    expect(characterRunPlan({ ...base, intent: 'edit', hasMask: true, imageModelType: 'sdxl' })).toMatchObject({ message: expect.stringMatching(/Pick a Z Image model/) })
-    expect(characterRunPlan({ ...base, intent: 'edit', hasMask: true, imageModelType: 'qwenimage', mac: true })).toEqual({ kind: 'error', message: CHARACTER_EDIT_ON_MAC })
+    expect(characterRunPlan({ ...base, intent: 'edit', hasMask: true })).toEqual({ kind: 'error', message: EDIT_MASK_NO_CHARACTER })
   })
 
   it('every video lane chains, a start image of the user wins', () => {

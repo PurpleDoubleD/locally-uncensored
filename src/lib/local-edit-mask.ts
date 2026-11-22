@@ -2,18 +2,18 @@
 // an object goes by painting over it in Edit and pressing Create without a
 // prompt.
 //
-// ComfyUI wires a mask into the SD 1.5 and SDXL checkpoint graph and into
-// Z-Image (api/dynamic-workflow.ts). Every other family refuses
+// ComfyUI wires a mask into the SD 1.5 and SDXL checkpoint graph only
+// (api/dynamic-workflow.ts, sdCheckpointFamily). Every other family refuses
 // it at build time, so the tab says so before the click. On a Mac every model
 // of the Edit lane is Qwen-Image 2.1, which reads the mask (mflux
 // `--mask-image`, commands/image_mflux.rs).
 
-/** The model types whose graph reads a mask. 'unknown' does too: the builder
- *  falls through to CheckpointLoaderSimple for it. */
-const COMFY_MASK_TYPES: ReadonlySet<string> = new Set(['sd15', 'sdxl', 'zimage', 'unknown'])
+/** The model types that reach the checkpoint graph. 'unknown' does too: the
+ *  builder falls through to CheckpointLoaderSimple for it. */
+const COMFY_MASK_TYPES: ReadonlySet<string> = new Set(['sd15', 'sdxl', 'unknown'])
 
 export const MASK_NEEDS_CHECKPOINT =
-  'This model cannot use a mask. Pick Z Image or an SDXL or SD 1.5 checkpoint, or clear the mask to edit the whole image.'
+  'This model cannot use a mask. Pick an SDXL or SD 1.5 checkpoint, or clear the mask to edit the whole image.'
 
 export const MASK_PROMPT_PLACEHOLDER = 'Describe what goes there, or leave this empty to remove what you painted…'
 

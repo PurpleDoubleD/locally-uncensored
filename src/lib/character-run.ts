@@ -14,9 +14,8 @@ export const CHARACTER_IMAGE_LANES: ReadonlySet<string> = new Set(['image', 'edi
 /** The tabs that start from an image of the character. */
 export const CHARACTER_VIDEO_LANES: ReadonlySet<string> = new Set(['video', 'animate', 'extend', 'lipsync', 'motion'])
 
-/** On a Mac the Edit lane is Qwen-Image only, so there is no model to switch to. */
-export const CHARACTER_EDIT_ON_MAC =
-  'Edit on this Mac runs on Qwen-Image, and this character was trained for Z Image. Make the picture in Image, or remove the character.'
+export const EDIT_MASK_NO_CHARACTER =
+  'A character in Edit works without a mask. Z Image cannot paint into a masked area. Clear the mask to use the character.'
 
 /** Box run d307-d: without a model for the tab, step 1 rendered the
  *  character's image for minutes and only then step 2 said that no video
@@ -45,8 +44,6 @@ export interface CharacterRunInput {
   imageModelType: ModelType
   /** Image and Edit: whether a model of the character's family is installed. */
   baseInstalled: boolean
-  /** The Mac: its Edit lane has no model of the character's family. */
-  mac?: boolean
   /** Video: the video model the run takes ('' for the lanes with their own model). */
   videoModel: string
   /** Video: true when no installed model can run step 2 of this tab
@@ -76,9 +73,9 @@ export function characterRunPlan(input: CharacterRunInput): CharacterRunPlan {
   const file = characterLoraFile(input.character)
   if (!file || !input.character) return { kind: 'none' }
   if (CHARACTER_IMAGE_LANES.has(input.intent)) {
+    if (input.intent === 'edit' && input.hasMask) return { kind: 'error', message: EDIT_MASK_NO_CHARACTER }
     const block = characterRunBlock(file, input.imageModelType, input.baseInstalled)
-    if (!block) return { kind: 'image', file }
-    return { kind: 'error', message: input.mac && input.intent === 'edit' ? CHARACTER_EDIT_ON_MAC : block }
+    return block ? { kind: 'error', message: block } : { kind: 'image', file }
   }
   if (!CHARACTER_VIDEO_LANES.has(input.intent)) return { kind: 'none' }
   if (input.hasSource) return { kind: 'source-wins' }

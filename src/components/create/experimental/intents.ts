@@ -54,7 +54,7 @@ export const INTENTS: IntentMeta[] = [
     // This IS the image-to-image tab. Source + empty mask restyles the WHOLE
     // image (VAEEncode at denoise 0.7, dynamic-workflow isI2I); painting a mask
     // switches to inpaint (VAEEncodeForInpaint / InpaintModelConditioning) on
-    // the SDXL/SD1.5 checkpoint path, SetLatentNoiseMask on Z-Image. Cloud keeps its hosted edit endpoint; both
+    // the SDXL/SD1.5 checkpoint path. Cloud keeps its hosted edit endpoint; both
     // share the MaskEditor. Renamed 2.5.9: "Edit" alone hid the i2i entry for
     // the r/SD crowd who search for "image to image" (GH D#86 jendrelele /
     // A user / a user; the owner committed to making it clearer).

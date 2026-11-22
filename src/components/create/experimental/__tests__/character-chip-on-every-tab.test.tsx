@@ -129,11 +129,11 @@ describe('the chip', () => {
     expect((await screen.findByTestId('character-note')).textContent).toBe('Your start image is used. Remove it to start from mira.')
   })
 
-  it('on Edit with a mask on Z Image the character runs, with the normal note', async () => {
+  it('on Edit with a mask the note says the character needs none', async () => {
     on('edit', [QWEN, BASE], {
       selectedCharacter: MIRA, imageModel: BASE.name, imageModelType: 'zimage',
       source: { filename: 'a.png', url: 'blob:a', width: 1, height: 1 }, mask: { filename: 'm.png', url: 'blob:m', width: 1, height: 1 },
     })
-    expect((await screen.findByTestId('character-note')).textContent).toMatch(/goes into your prompt/)
+    expect((await screen.findByTestId('character-note')).textContent).toMatch(/works without a mask/)
   })
 })

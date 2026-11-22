@@ -3059,7 +3059,6 @@ export function useCreate() {
       hasMask: !!s.mask,
       imageModelType: s.imageModelList.find((m) => m.name === effImage)?.type ?? classifyModel(effImage),
       baseInstalled: !!characterBaseModel(file, s.imageModelList, effImage),
-      mac,
       // The Mac knows from its catalogue which model takes a start image;
       // the name rule below is the one for ComfyUI's files.
       videoModel: intent === 'video' && !mac ? effVideo : '',

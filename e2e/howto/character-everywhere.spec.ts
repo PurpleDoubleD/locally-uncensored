@@ -15,8 +15,8 @@ import { Rec, HOWTO_OUT } from './rec'
 //    "“<trigger>” goes into your prompt by itself. Describe the key features
 //    too."; on a video tab "First an image of <name> is made with Z Image,
 //    then the video starts from it."
-//  - lib/character-run.ts: a character in Edit runs with or without a mask
-//    on Z Image.
+//  - lib/character-run.ts EDIT_MASK_NO_CHARACTER: a character in Edit works
+//    without a mask.
 //  - CharacterChip.tsx characterMakesStart and Composer.tsx: a video tab with
 //    a character needs no start image of its own.
 //  - lib/characters.ts CHAIN_STEP_IMAGE / CHAIN_STEP_VIDEO and
@@ -167,7 +167,7 @@ test('character-everywhere', async ({ page }) => {
   await rec.move(note, { dur: 0.6, at: { dy: 22 }, real: false })
   rec.hold(1.4)
 
-  rec.scene('Edit uses the same character on your image.')
+  rec.scene('Edit uses the same character on your image, without a mask.')
   await rec.cam('full', 1, 0.8)
   await rec.click(page.getByRole('radio', { name: 'Edit / Image to Image', exact: true }), { dur: 0.8, settle: 800, after: 0.2 })
   await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
