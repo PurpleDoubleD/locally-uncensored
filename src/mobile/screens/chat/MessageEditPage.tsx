@@ -5,6 +5,7 @@
  */
 import { useLayoutEffect, useRef, useState } from 'react'
 import { useChatStore } from '../../../stores/chatStore'
+import { useReplyWriteStore } from '../../../stores/replyWriteStore'
 import { nav, useLeaveGuard, useParams, useRoute } from '../../nav'
 import { CHAT_STRINGS } from '../../strings/chat'
 import { Button, EmptyState, Page, toast } from '../../ui'
@@ -21,6 +22,8 @@ export default function MessageEditPage() {
   const original = message ? answerBody(message) : ''
   const [text, setText] = useState(original)
   const dirty = !!message && text !== original
+  // A run that still writes this answer would overwrite what is saved now.
+  const stillWriting = useReplyWriteStore((s) => !!s.open[messageId])
   useLeaveGuard(dirty)
   // The field is as tall as its text, so the page scrolls and not a box inside it.
   const field = useRef<HTMLTextAreaElement>(null)
@@ -49,7 +52,7 @@ export default function MessageEditPage() {
 
   const empty = text.trim().length === 0
   const save = () => {
-    if (empty) return
+    if (empty || stillWriting) return
     useChatStore.getState().updateMessageContent(id, message.id, text.trim())
     // The text is the user's own now: what a failed run left at the answer no longer describes it.
     if (message.error) useChatStore.getState().updateMessageError(id, message.id, null)
@@ -66,7 +69,7 @@ export default function MessageEditPage() {
       noJumpWithKeyboard
       footer={
         <>
-          <Button variant="primary" block disabled={empty || !dirty} disabledReason={empty ? S.edit.empty : undefined} onPress={save} testid="m-chat-edit-save">
+          <Button variant="primary" block disabled={empty || !dirty || stillWriting} disabledReason={stillWriting ? S.actions.busy : empty ? S.edit.empty : undefined} onPress={save} testid="m-chat-edit-save">
             {S.edit.save}
           </Button>
           <Button block onPress={() => void nav.back()} testid="m-chat-edit-cancel-page">

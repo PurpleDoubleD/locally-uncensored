@@ -394,7 +394,7 @@ function MessageBubbleImpl({ message, onRegenerate, onRegenerateRound, onEdit, p
         {/* Thinking block — auto-expands while this (last) turn is still
             producing so the reasoning streams LIVE, then collapses (2026-06-04). */}
         {!isUser && message.thinking && (
-          <ThinkingBlock thinking={message.thinking} streaming={!!isLast && !message.content?.trim() && !message.usage} />
+          <ThinkingBlock thinking={message.thinking} streaming={!!isStreaming && !message.content?.trim() && !message.usage} />
         )}
 
         {/* Agent Mode: render tool_call + reflection + answer blocks

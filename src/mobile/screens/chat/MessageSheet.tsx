@@ -9,6 +9,7 @@
 import { Copy, Flag, Pencil, RefreshCw, Share2, Square, TextSelect, Trash2, Volume2 } from 'lucide-react'
 import { useModelStore } from '../../../stores/modelStore'
 import { useChatStore } from '../../../stores/chatStore'
+import { useReplyWriteStore } from '../../../stores/replyWriteStore'
 import { nav, useSheet } from '../../nav'
 import { CHAT_STRINGS } from '../../strings/chat'
 import { ListGroup, Notice, Row, Sheet, toast } from '../../ui'
@@ -30,6 +31,8 @@ export default function MessageSheet() {
   const messageId = sheet.props?.messageId
   const message = useChatStore((s) => s.conversations.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId))
   const controller = chatController(chatId)
+  // Stop ends `busy` at once, while a stopped agent run can still write this answer.
+  const stillWriting = useReplyWriteStore((s) => !!messageId && !!s.open[messageId])
 
   if (!chatId || !message) {
     return (
@@ -118,7 +121,7 @@ export default function MessageSheet() {
             el="C6.3"
           />
         ) : null}
-        <Row title={S.actions.edit} icon={Pencil} chevron={isAnswer} disabled={(isAnswer && busy) || (!isAnswer && !controller)} disabledReason={busy ? S.actions.busy : undefined} onPress={edit} testid="m-chat-message-edit" el="C6.4" />
+        <Row title={S.actions.edit} icon={Pencil} chevron={isAnswer} disabled={(isAnswer && (busy || stillWriting)) || (!isAnswer && !controller)} disabledReason={busy || (isAnswer && stillWriting) ? S.actions.busy : undefined} onPress={edit} testid="m-chat-message-edit" el="C6.4" />
         <Row title={S.actions.share} icon={Share2} chevron={false} disabled={!text} onPress={share} risk="leaves-app" testid="m-chat-message-share" el="C6.5" />
         <Row
           title={S.actions.selectText}
