@@ -910,6 +910,10 @@ export const CUSTOM_NODE_REGISTRY: Record<string, CustomNodeEntry> = {
     repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux',
     name: 'comfyui_controlnet_aux',
     requiredNodes: ['DWPreprocessor'],
+    // Pinned in 3.1.3: Swap and Motion install this pack by default, and an
+    // unpinned clone took whatever its head was that day. c2655d29 (17.11.2026)
+    // is the commit that ran Swap on the RTX 5080.
+    commit: 'c2655d2970d810d8a3d71deed204cdf416b66132',
   },
 }
 

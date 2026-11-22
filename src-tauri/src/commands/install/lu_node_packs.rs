@@ -34,7 +34,7 @@ pub(crate) const LU_NODE_PACKS: &[LuNodePack] = &[
     LuNodePack { key: "videohelpersuite", repo: "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite", name: "ComfyUI-VideoHelperSuite", commit: None },
     LuNodePack { key: "rmbg", repo: "https://github.com/1038lab/ComfyUI-RMBG", name: "ComfyUI-RMBG", commit: Some("58f1947a11567a9f8b707223185570850e773856") },
     LuNodePack { key: "gguf", repo: "https://github.com/city96/ComfyUI-GGUF", name: "ComfyUI-GGUF", commit: Some("6ea2651e7df66d7585f6ffee804b20e92fb38b8a") },
-    LuNodePack { key: "controlnet-aux", repo: "https://github.com/Fannovel16/comfyui_controlnet_aux", name: "comfyui_controlnet_aux", commit: None },
+    LuNodePack { key: "controlnet-aux", repo: "https://github.com/Fannovel16/comfyui_controlnet_aux", name: "comfyui_controlnet_aux", commit: Some("c2655d2970d810d8a3d71deed204cdf416b66132") },
 ];
 
 /// Das Paket zu einem Schlüssel, oder die Ablehnung in Worten.
