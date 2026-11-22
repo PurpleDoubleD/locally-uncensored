@@ -10,7 +10,7 @@
  *
  * The rows stay hidden until INKLING_ENGINE_LOADED is true. Set it only after
  * a real load on the pinned engine, as with the other gated architectures.
- * Loaded on b12608 on 2026-11-21 (M5 Pro, Metal, Q3_K_S): chat, thinking, a tool
+ * Loaded on b12622 on 2026-11-22 (M5 Pro, Metal, Q3_K_S): chat, thinking, a tool
  * call, an image, a restart and the MoE flags. A pin older than b12600 has no
  * inkling2_loop, so taking the pin back means setting this to false.
  */

@@ -105,7 +105,7 @@ in the cloud catalogue.
   Actions used to build the release.
 - Building from source needs Rust 1.95 or newer (`rust-version` in
   `src-tauri/Cargo.toml`).
-- **LU Engine on llama.cpp b12608.** The Vulkan SDK moves to 1.4.357.0 on
+- **LU Engine on llama.cpp b12622.** The Vulkan SDK moves to 1.4.357.0 on
   Windows and Linux.
 
 ## [3.1.2] - 2026-11-19
