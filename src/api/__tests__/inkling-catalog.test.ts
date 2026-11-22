@@ -10,6 +10,7 @@ import {
 } from '../inkling-catalog'
 import { getMainstreamTextModels, getUncensoredTextModels } from '../discover'
 import { parsePinnedLlamaTag } from '../gguf-arch'
+import { isAgentCompatible, isThinkingCompatible, isVisionCompatible } from '../../lib/model-compatibility'
 
 const REPO = 'bartowski/thinkingmachines_Inkling-2-Mini-GGUF'
 const rows = inklingEntriesUngated()
@@ -45,6 +46,15 @@ describe('the Inkling 2 Mini catalog rows', () => {
   it('carries no uncensored variant', () => {
     for (const m of rows) expect(`${m.name} ${m.description} ${m.filename}`).not.toMatch(/uncensored|abliterat|heretic/i)
     expect(getUncensoredTextModels().some((m) => /inkling/i.test(m.name))).toBe(false)
+  })
+
+  it('counts as agent, thinking and vision model under its real file name', () => {
+    for (const m of rows) {
+      const local = m.filename!.replace(/\.gguf$/, '')
+      expect(isAgentCompatible(local), local).toBe(true)
+      expect(isThinkingCompatible(local), local).toBe(true)
+      expect(isVisionCompatible(local), local).toBe(true)
+    }
   })
 
   it('is open only on a pin that knows inkling2_loop', () => {

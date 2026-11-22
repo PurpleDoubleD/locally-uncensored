@@ -1,4 +1,4 @@
-# Every option name common/arg.cpp of llama.cpp b12608 (93cb37ea7b5f134cc500b1c5b91d971190600a1a) defines.
+# Every option name common/arg.cpp of llama.cpp b12622 (19bc41dbb41e858eebc269b49ccdec1f0d28880c) defines.
 # Made by: grep -oE '\{ *"-[^}]*\}' common/arg.cpp | tr -d ' ' | tr ',' '\n' | tr -d '{}"' | grep '^-' | sort -u
 # The engine test flags_lu_passes_exist_in_the_pinned_engine reads it (E1, 3.0.9).
 --adaptive-decay

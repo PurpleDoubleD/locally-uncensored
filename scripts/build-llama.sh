@@ -52,8 +52,8 @@ set -euo pipefail
 # CI reuses a cached checkout keyed on hashFiles('scripts/build-llama.sh')
 # (release.yml, sidecar-windows.yml), so both values below are inside the cache
 # key by construction — bumping one cannot silently reuse the old source tree.
-LLAMA_TAG="${LLAMA_TAG:-b12608}"
-LLAMA_COMMIT="${LLAMA_COMMIT:-93cb37ea7b5f134cc500b1c5b91d971190600a1a}"
+LLAMA_TAG="${LLAMA_TAG:-b12622}"
+LLAMA_COMMIT="${LLAMA_COMMIT:-19bc41dbb41e858eebc269b49ccdec1f0d28880c}"
 LLAMA_REPO="${LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 
 # --- Paths -----------------------------------------------------------------
