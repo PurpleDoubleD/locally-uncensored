@@ -23,6 +23,12 @@ const seen = vi.hoisted(() => ({
 
 const GATE = 'YuE2 needs ComfyUI 0.36.0 or newer. Update ComfyUI in Settings.'
 
+// jsdom never loads a video, so the length of the clip stays unread.
+vi.mock('../../components/create/experimental/useStudioPrice', async (orig) => ({
+  ...(await orig<typeof import('../../components/create/experimental/useStudioPrice')>()),
+  mediaSeconds: async () => undefined,
+}))
+
 vi.mock('../../api/mlx-image', () => ({
   isMlxImageHost: () => false,
   isMlxImageModel: () => false,

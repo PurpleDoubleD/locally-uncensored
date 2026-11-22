@@ -3557,13 +3557,29 @@ export async function buildMotionWorkflow(params: LocalOpParams, seed: number, a
 
   const videoId = String(n++)
   workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
-  const componentsId = String(n++)
-  workflow[componentsId] = { class_type: 'GetVideoComponents', inputs: { video: [videoId, 0] } }
+  const fps = params.fps || 16
+  let drivingFrames: [string, number]
+  let drivingAudio: [string, number]
+  let outFps: number | [string, number] = fps
+  let runLength: number | [string, number] = length
+  if (hasTimedClipNodes(allNodes)) {
+    const clip = addTimedClip(workflow, n, videoId, length, fps, allNodes)
+    n = clip.n
+    drivingFrames = clip.frames
+    drivingAudio = clip.audio
+    outFps = clip.fps
+    runLength = clip.length
+  } else {
+    const componentsId = String(n++)
+    workflow[componentsId] = { class_type: 'GetVideoComponents', inputs: { video: [videoId, 0] } }
+    drivingFrames = [componentsId, 0]
+    drivingAudio = [componentsId, 1]
+  }
   const poseId = String(n++)
   workflow[poseId] = {
     class_type: 'DWPreprocessor',
     inputs: {
-      image: [componentsId, 0], detect_hand: 'enable', detect_body: 'enable', detect_face: 'enable',
+      image: drivingFrames, detect_hand: 'enable', detect_body: 'enable', detect_face: 'enable',
       resolution: Math.min(width, height),
       bbox_detector: 'yolox_l.onnx', pose_estimator: 'dw-ll_ucoco_384.onnx',
     },
@@ -3580,7 +3596,7 @@ export async function buildMotionWorkflow(params: LocalOpParams, seed: number, a
       class_type: 'WanVaceToVideo',
       inputs: {
         positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
-        width, height, length, batch_size: 1, strength: 1.0,
+        width, height, length: runLength, batch_size: 1, strength: 1.0,
         control_video: [poseId, 0], reference_image: [scaleId, 0],
       },
     }
@@ -3589,7 +3605,7 @@ export async function buildMotionWorkflow(params: LocalOpParams, seed: number, a
       class_type: 'WanAnimateToVideo',
       inputs: {
         positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
-        width, height, length, batch_size: 1,
+        width, height, length: runLength, batch_size: 1,
         reference_image: [scaleId, 0], pose_video: [poseId, 0],
         continue_motion_max_frames: 5, video_frame_offset: 0,
       },
@@ -3613,7 +3629,7 @@ export async function buildMotionWorkflow(params: LocalOpParams, seed: number, a
   const decodeId = String(n++)
   workflow[decodeId] = videoDecodeNode([trimId, 0], [vaeId, 0], 'VAEDecodeTiled' in allNodes)
 
-  addVideoWithAudioOutput(workflow, n, decodeId, params.fps || 16, [componentsId, 1], allNodes, params.prompt)
+  addVideoWithAudioOutput(workflow, n, decodeId, outFps, drivingAudio, allNodes, params.prompt)
   return workflow
 }
 
@@ -3632,9 +3648,9 @@ export const SCENE_DEPTH_CKPT = 'depth_anything_v2_vits.pth'
  * VACE was trained with depth maps from Depth Anything, so this is the
  * control it reads best; the grey render itself would be read as the look.
  * VHS_LoadVideo resamples the clip to 16 fps (VACE's rate) and stops at the
- * run's length. Without the VideoHelperSuite pack the core LoadVideo takes
- * the clip at its own rate and the result plays at that rate, so the motion
- * keeps its speed either way.
+ * run's length. Without the VideoHelperSuite pack the core nodes do the same
+ * (addTimedClip). Only a ComfyUI too old for them takes the first frames at
+ * the clip's own rate, which keeps the speed but makes a shorter result.
  *
  * An own first frame opens the control video in place of the first depth
  * frame, with a mask of 0 there (keep) and 1 everywhere else (paint): VACE's
@@ -3683,6 +3699,7 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
   // The frames of the scene, at most `length` of them.
   let frames: [string, number]
   let outFps: number | [string, number] = fps
+  let runLength: number | [string, number] = length
   if (vhs) {
     const loadId = String(n++)
     workflow[loadId] = {
@@ -3693,6 +3710,14 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
       },
     }
     frames = [loadId, 0]
+  } else if (hasTimedClipNodes(allNodes)) {
+    const videoId = String(n++)
+    workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
+    const clip = addTimedClip(workflow, n, videoId, length, fps, allNodes)
+    n = clip.n
+    frames = clip.frames
+    outFps = clip.fps
+    runLength = clip.length
   } else {
     const videoId = String(n++)
     workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
@@ -3712,6 +3737,16 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
   let control: [string, number] = [depthId, 0]
   let masks: [string, number] | null = null
   if (params.firstFrame) {
+    // Everything after the first frame, as a number or from the math node.
+    let restLength: number | [string, number] = length - 1
+    if (Array.isArray(runLength)) {
+      const restCountId = String(n++)
+      workflow[restCountId] = {
+        class_type: 'ComfyMathExpression',
+        inputs: { expression: 'a - 1', 'values.a': [runLength[0], 0] },
+      }
+      restLength = [restCountId, 1]
+    }
     const imageId = String(n++)
     workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.firstFrame } }
     const firstId = String(n++)
@@ -3719,7 +3754,7 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
     const depthSizedId = String(n++)
     workflow[depthSizedId] = { class_type: 'ImageScale', inputs: { image: [depthId, 0], upscale_method: 'bilinear', width, height, crop: 'disabled' } }
     const restId = String(n++)
-    workflow[restId] = { class_type: 'ImageFromBatch', inputs: { image: [depthSizedId, 0], batch_index: 1, length: length - 1 } }
+    workflow[restId] = { class_type: 'ImageFromBatch', inputs: { image: [depthSizedId, 0], batch_index: 1, length: restLength } }
     const batchId = String(n++)
     workflow[batchId] = { class_type: 'ImageBatch', inputs: { image1: [firstId, 0], image2: [restId, 0] } }
     control = [batchId, 0]
@@ -3727,7 +3762,7 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
     const keepId = String(n++)
     workflow[keepId] = { class_type: 'EmptyImage', inputs: { width, height, batch_size: 1, color: 0 } }
     const paintId = String(n++)
-    workflow[paintId] = { class_type: 'EmptyImage', inputs: { width, height, batch_size: length - 1, color: 0xffffff } }
+    workflow[paintId] = { class_type: 'EmptyImage', inputs: { width, height, batch_size: restLength, color: 0xffffff } }
     const maskImagesId = String(n++)
     workflow[maskImagesId] = { class_type: 'ImageBatch', inputs: { image1: [keepId, 0], image2: [paintId, 0] } }
     const maskId = String(n++)
@@ -3740,7 +3775,7 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
     class_type: 'WanVaceToVideo',
     inputs: {
       positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
-      width, height, length, batch_size: 1, strength: 1.0,
+      width, height, length: runLength, batch_size: 1, strength: 1.0,
       control_video: control,
       ...(masks ? { control_masks: masks } : {}),
     },
@@ -3849,56 +3884,14 @@ export async function buildSwapWorkflow(params: LocalOpParams, seed: number, all
     }
     frames = [videoId, 0]
     audio = [videoId, 2]
-  } else if (allNodes['Video Slice'] && allNodes['VideoFrameSample']) {
+  } else if (hasTimedClipNodes(allNodes)) {
     workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
-    let cutSeconds: number | [string, number] = length / fps
-    if (allNodes['ComfyMathExpression']) {
-      // A video slower than the run has fewer frames than the run wants: it
-      // keeps its own rate, and the run makes only the frames it really has.
-      // The rate is read from a quarter second, so nothing big is decoded.
-      const probeId = String(n++)
-      workflow[probeId] = {
-        class_type: 'Video Slice',
-        inputs: { video: [videoId, 0], start_time: 0, duration: 0.25, strict_duration: false },
-      }
-      const probedId = String(n++)
-      workflow[probedId] = { class_type: 'GetVideoComponents', inputs: { video: [probeId, 0] } }
-      const rateId = String(n++)
-      workflow[rateId] = {
-        class_type: 'ComfyMathExpression',
-        inputs: { expression: swapRateExpression(fps), 'values.a': [probedId, 2] },
-      }
-      const countId = String(n++)
-      workflow[countId] = {
-        class_type: 'ComfyMathExpression',
-        inputs: { expression: swapFramesExpression(length, fps), 'values.a': [rateId, 0] },
-      }
-      const secondsId = String(n++)
-      workflow[secondsId] = {
-        class_type: 'ComfyMathExpression',
-        inputs: { expression: 'a / b', 'values.a': [countId, 0], 'values.b': [rateId, 0] },
-      }
-      runLength = [countId, 1]
-      cutSeconds = [secondsId, 0]
-      outFps = [rateId, 0]
-    }
-    const sliceId = String(n++)
-    workflow[sliceId] = {
-      class_type: 'Video Slice',
-      inputs: { video: [videoId, 0], start_time: 0, duration: cutSeconds, strict_duration: false },
-    }
-    const sampleId = String(n++)
-    workflow[sampleId] = {
-      class_type: 'VideoFrameSample',
-      inputs: { video: [sliceId, 0], num_frames: runLength, strategy: 'uniform', seed: 0 },
-    }
-    const sampledId = String(n++)
-    workflow[sampledId] = { class_type: 'GetVideoComponents', inputs: { video: [sampleId, 0] } }
-    // The sampled video has no sound, the cut one has exactly this stretch.
-    const soundId = String(n++)
-    workflow[soundId] = { class_type: 'GetVideoComponents', inputs: { video: [sliceId, 0] } }
-    frames = [sampledId, 0]
-    audio = [soundId, 1]
+    const clip = addTimedClip(workflow, n, videoId, length, fps, allNodes)
+    n = clip.n
+    frames = clip.frames
+    audio = clip.audio
+    outFps = clip.fps
+    runLength = clip.length
   } else {
     workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
     const componentsId = String(n++)
@@ -3988,14 +3981,90 @@ export async function buildSwapWorkflow(params: LocalOpParams, seed: number, all
   return workflow
 }
 
-/** The rate a local Swap plays at, for ComfyMathExpression (a: the video's). */
-export function swapRateExpression(fps: number): string {
+/** The core nodes that read a video at the run's rate without VideoHelperSuite. */
+function hasTimedClipNodes(allNodes: NodePresence): boolean {
+  return !!allNodes['Video Slice'] && !!allNodes['VideoFrameSample']
+}
+
+/**
+ * The first `length / fps` seconds of a video as `length` evenly spaced frames,
+ * so a run at 16 fps moves in real time whatever rate the video has. The sound
+ * is that same stretch. With the math node a video slower than the run keeps
+ * its own rate and the run makes only the frames it really has, nothing is
+ * invented; without it the run's length and rate stand as asked.
+ */
+function addTimedClip(
+  workflow: ComfyApiGraph,
+  start: number,
+  videoId: string,
+  length: number,
+  fps: number,
+  allNodes: NodePresence,
+): {
+  n: number
+  frames: [string, number]
+  audio: [string, number]
+  fps: number | [string, number]
+  length: number | [string, number]
+} {
+  let n = start
+  let cutSeconds: number | [string, number] = length / fps
+  let runLength: number | [string, number] = length
+  let outFps: number | [string, number] = fps
+  if (allNodes['ComfyMathExpression']) {
+    // The rate is read from a quarter second, so nothing big is decoded.
+    const probeId = String(n++)
+    workflow[probeId] = {
+      class_type: 'Video Slice',
+      inputs: { video: [videoId, 0], start_time: 0, duration: 0.25, strict_duration: false },
+    }
+    const probedId = String(n++)
+    workflow[probedId] = { class_type: 'GetVideoComponents', inputs: { video: [probeId, 0] } }
+    const rateId = String(n++)
+    workflow[rateId] = {
+      class_type: 'ComfyMathExpression',
+      inputs: { expression: clipRateExpression(fps), 'values.a': [probedId, 2] },
+    }
+    const countId = String(n++)
+    workflow[countId] = {
+      class_type: 'ComfyMathExpression',
+      inputs: { expression: clipFramesExpression(length, fps), 'values.a': [rateId, 0] },
+    }
+    const secondsId = String(n++)
+    workflow[secondsId] = {
+      class_type: 'ComfyMathExpression',
+      inputs: { expression: 'a / b', 'values.a': [countId, 0], 'values.b': [rateId, 0] },
+    }
+    runLength = [countId, 1]
+    cutSeconds = [secondsId, 0]
+    outFps = [rateId, 0]
+  }
+  const sliceId = String(n++)
+  workflow[sliceId] = {
+    class_type: 'Video Slice',
+    inputs: { video: [videoId, 0], start_time: 0, duration: cutSeconds, strict_duration: false },
+  }
+  const sampleId = String(n++)
+  workflow[sampleId] = {
+    class_type: 'VideoFrameSample',
+    inputs: { video: [sliceId, 0], num_frames: runLength, strategy: 'uniform', seed: 0 },
+  }
+  const sampledId = String(n++)
+  workflow[sampledId] = { class_type: 'GetVideoComponents', inputs: { video: [sampleId, 0] } }
+  // The sampled video has no sound, the cut one has exactly this stretch.
+  const soundId = String(n++)
+  workflow[soundId] = { class_type: 'GetVideoComponents', inputs: { video: [sliceId, 0] } }
+  return { n, frames: [sampledId, 0], audio: [soundId, 1], fps: outFps, length: runLength }
+}
+
+/** The rate a timed clip plays at, for ComfyMathExpression (a: the video's). */
+export function clipRateExpression(fps: number): string {
   return `min(a, ${fps})`
 }
 
-/** The frames of a local Swap on Wan's 4n + 1 grid, never more than the video
- *  has in the run's stretch (a: the rate from swapRateExpression). */
-export function swapFramesExpression(length: number, fps: number): string {
+/** The frames of a timed clip on Wan's 4n + 1 grid, never more than the video
+ *  has in the run's stretch (a: the rate from clipRateExpression). */
+export function clipFramesExpression(length: number, fps: number): string {
   return `max(1, floor((min(${length}, floor(${length / fps} * a)) - 1) / 4)) * 4 + 1`
 }
 

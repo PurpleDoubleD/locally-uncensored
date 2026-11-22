@@ -20,6 +20,12 @@ const seen = vi.hoisted(() => ({
   onBuild: null as null | (() => void),
 }))
 
+// jsdom never loads a video, so the length of the clip stays unread.
+vi.mock('../../components/create/experimental/useStudioPrice', async (orig) => ({
+  ...(await orig<typeof import('../../components/create/experimental/useStudioPrice')>()),
+  mediaSeconds: async () => undefined,
+}))
+
 vi.mock('../../api/mlx-image', () => ({
   isMlxImageHost: () => false,
   isMlxImageModel: () => false,

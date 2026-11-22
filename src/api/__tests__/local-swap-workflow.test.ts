@@ -1,7 +1,7 @@
 // Swap Character on this computer (3.1.3): Wan 2.2 Animate in replace mode,
 // with a mask made from the DWPose skeleton by ComfyUI's core mask nodes.
 import { describe, it, expect, vi } from 'vitest'
-import { buildSwapWorkflow, swapFramesExpression, swapMaskGrow, swapRateExpression, WorkflowUnavailableError, type LocalOpParams } from '../dynamic-workflow'
+import { buildSwapWorkflow, clipFramesExpression, swapMaskGrow, clipRateExpression, WorkflowUnavailableError, type LocalOpParams } from '../dynamic-workflow'
 import type { ComfyApiGraph, ComfyApiNode } from '../../types/comfy-graph'
 
 vi.mock('../comfyui', async (importOriginal) => {
@@ -76,8 +76,8 @@ describe('buildSwapWorkflow', () => {
   it('with the math node: the frames, the cut and the output rate all follow the video', async () => {
     const wf = await buildSwapWorkflow(params({ frames: 81 }), 7, nodes('Video Slice', 'VideoFrameSample', 'ComfyMathExpression'))
     const maths = Object.entries(wf).filter(([, x]) => x.class_type === 'ComfyMathExpression') as [string, Node][]
-    const rate = maths.find(([, x]) => x.inputs.expression === swapRateExpression(16))![0]
-    const count = maths.find(([, x]) => x.inputs.expression === swapFramesExpression(81, 16))![0]
+    const rate = maths.find(([, x]) => x.inputs.expression === clipRateExpression(16))![0]
+    const count = maths.find(([, x]) => x.inputs.expression === clipFramesExpression(81, 16))![0]
     const seconds = maths.find(([, x]) => x.inputs.expression === 'a / b')![0]
     const cut = Object.values(wf).filter((x) => x.class_type === 'Video Slice').map((x) => (x as Node).inputs.duration)
     expect(cut).toContainEqual([seconds, 0])
@@ -93,8 +93,8 @@ describe('buildSwapWorkflow', () => {
   it.each([[60, 16, 81], [30, 16, 81], [24, 16, 81], [16, 16, 81], [15, 15, 73], [12, 12, 57], [8, 8, 37]])(
     'a %i fps video plays at %i fps with %i frames, at its real speed',
     (source, rate, frames) => {
-      const played = evaluate(swapRateExpression(16), source)
-      const count = evaluate(swapFramesExpression(81, 16), played)
+      const played = evaluate(clipRateExpression(16), source)
+      const count = evaluate(clipFramesExpression(81, 16), played)
       expect([played, count]).toEqual([rate, frames])
       expect((count - 1) % 4).toBe(0)
       expect(count / played).toBeLessThanOrEqual(81 / 16)

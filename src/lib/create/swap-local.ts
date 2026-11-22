@@ -37,18 +37,23 @@ export function swapLocalProblem(s: {
   return null
 }
 
-/** How many frames the run makes: Wan's grid of 4n + 1, as much of the clip as
- *  fits in the local limit and never longer than the clip. A clip whose length
- *  could not be read counts as long enough. */
+/** The frames a local video run makes: Wan's grid of 4n + 1, at most `wanted`
+ *  and never longer than the clip. A clip whose length could not be read
+ *  counts as long enough. */
+export function localClipFrames(wanted: number, clipSeconds: number | undefined, fps: number): number {
+  const rate = fps > 0 ? fps : 16
+  const most = clipSeconds && clipSeconds > 0 ? Math.min(clipSeconds * rate, wanted) : wanted
+  return Math.max(1, Math.floor((most - 1) / 4)) * 4 + 1
+}
+
+/** A local Swap: as much of the clip as fits in the local limit. */
 export function swapLocalFrames(
   clipSeconds: number | undefined,
   fps: number,
   maxSeconds = swapCan(SWAP_LOCAL_MODEL).maxSeconds,
 ): number {
   const rate = fps > 0 ? fps : 16
-  const longest = maxSeconds * rate + 1
-  const wanted = clipSeconds && clipSeconds > 0 ? Math.min(clipSeconds * rate, longest) : longest
-  return Math.max(1, Math.floor((wanted - 1) / 4)) * 4 + 1
+  return localClipFrames(maxSeconds * rate + 1, clipSeconds, rate)
 }
 
 /** The size of the run: the lane's size, turned to the video (a portrait

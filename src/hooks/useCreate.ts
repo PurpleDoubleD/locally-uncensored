@@ -143,7 +143,7 @@ import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '.
 import { settleSeams } from '../api/video-settle'
 import { ownWorkflowMisfitNote } from '../lib/own-workflow-fit'
 import { ensureLocalFilename, loadImageRef } from '../components/create/experimental/loadImage'
-import { swapLocalFrames, swapLocalModels, swapLocalProblem, swapLocalSize, SWAP_LOCAL_NO_MODEL } from '../lib/create/swap-local'
+import { localClipFrames, swapLocalFrames, swapLocalModels, swapLocalProblem, swapLocalSize, SWAP_LOCAL_NO_MODEL } from '../lib/create/swap-local'
 import { mediaSeconds } from '../components/create/experimental/useStudioPrice'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
@@ -2147,6 +2147,14 @@ export function useCreate() {
         const laneDefaults = COMFY_MODEL_DEFAULTS[imageModelType] ?? COMFY_MODEL_DEFAULTS.unknown
         if (localOp === 'swap' && state.videoInput) {
           laneFrames = swapLocalFrames(
+            await mediaSeconds(state.videoInput.url, 'video'),
+            mode === 'video' ? fps : laneDefaults.fps,
+          )
+        }
+        // A workflow of the user's own keeps the length the user set for it.
+        if (localOp === 'motion' && state.videoInput && !useWorkflowStore.getState().getWorkflowForModel(activeModel, imageModelType)) {
+          laneFrames = localClipFrames(
+            laneFrames || laneDefaults.frames,
             await mediaSeconds(state.videoInput.url, 'video'),
             mode === 'video' ? fps : laneDefaults.fps,
           )
