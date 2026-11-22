@@ -57,6 +57,7 @@ pub(crate) const CREATE_NO_WINDOW: u32 = 0x08000000;
 mod children;
 mod base_python;
 pub(crate) mod pip;
+pub(crate) mod pip_scratch;
 mod torch;
 mod venv;
 mod download;
@@ -124,6 +125,7 @@ mod tests {
         ("lmstudio_install.rs", include_str!("lmstudio_install.rs")),
         ("ollama.rs", include_str!("ollama.rs")),
         ("pip.rs", include_str!("pip.rs")),
+        ("pip_scratch.rs", include_str!("pip_scratch.rs")),
         ("piper_env.rs", include_str!("piper_env.rs")),
         ("python.rs", include_str!("python.rs")),
         ("torch.rs", include_str!("torch.rs")),

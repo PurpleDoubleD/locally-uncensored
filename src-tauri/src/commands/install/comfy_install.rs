@@ -36,6 +36,7 @@ use super::comfy_job::{ComfyJob, COMFY_JOB};
 use super::comfy_job::comfy_job_busy_message;
 use super::pip::pip_install_streaming_with_retry_cancellable;
 use super::torch::plan_pytorch_install;
+use super::pip_scratch::PipScratch;
 use super::venv::{create_comfyui_venv, restore_orphaned_venv_if_needed};
 #[cfg(target_os = "windows")]
 use super::git::{windows_git_install_hint, windows_git_probe, WindowsGitState};
@@ -622,6 +623,10 @@ pub fn install_comfyui(
              links it can be longer. Live pip output below — if you see new \
              lines appearing, the install is making progress, not hung.",
         );
+
+        // Linux: pip unpacks on the target disk, not in a small /tmp. Lives
+        // to the end of this thread, so every exit below cleans it up.
+        let _pip_scratch = PipScratch::enter(&target_dir);
 
         // GH #211: an old pip cannot read the PyTorch index.
         if let Some(line) = super::torch::lift_old_pip_before_torch(&effective_python, &install_status, Some(&cancel_flag)) {

@@ -30,6 +30,7 @@ use crate::os_error;
 use crate::python::python_command;
 
 use super::children::TrackedInstallerChild;
+use super::pip_scratch::{apply_pip_scratch, disk_full_hint};
 
 // ── pip helpers (issue #32: PyTorch / ComfyUI install reliability) ───────────
 
@@ -164,6 +165,8 @@ fn diagnose_pip_error_inner(stderr: &str, python_bin: Option<&str>) -> String {
     let hint = if kind == PipFailureKind::PythonWithoutSsl {
         let diagnosis = python_bin.map(diagnose_python_ssl).unwrap_or(SslDiagnosis::Unknown);
         python_without_ssl_hint(&diagnosis)
+    } else if kind == PipFailureKind::DiskFull {
+        disk_full_hint(pip_failure_hint(kind, stderr), stderr)
     } else {
         pip_failure_hint(kind, stderr)
     };
@@ -853,6 +856,7 @@ fn pip_install_streaming_with_retry_using(
         cmd.args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        apply_pip_scratch(&mut cmd);
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,

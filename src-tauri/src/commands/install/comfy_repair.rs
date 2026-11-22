@@ -34,6 +34,7 @@ use crate::os_error;
 use std::path::Path;
 use super::comfy_job::{finished_notice, requirements_fallback_log};
 use super::env_check::verify_and_heal_environment;
+use super::pip_scratch::PipScratch;
 use super::pip::{pip_install_streaming_with_retry_raw, requirements_failure_reason_for};
 
 use super::comfy_job::{ComfyJob, COMFY_JOB};
@@ -346,6 +347,9 @@ pub fn repair_comfyui_env(state: State<'_, AppState>) -> Result<serde_json::Valu
             "installing",
             "Downloading PyTorch into the new environment (~2 GB). Live pip output below.",
         );
+        // Linux: same reason and same lifetime as in `install_comfyui`.
+        let _pip_scratch = PipScratch::enter(&comfy_dir);
+
         // GH #211: an old pip cannot read the PyTorch index.
         if let Some(line) = super::torch::lift_old_pip_before_torch(&venv_py, &install_status, Some(&cancel_flag)) {
             update("installing", &line);
