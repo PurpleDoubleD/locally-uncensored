@@ -421,7 +421,7 @@ const markText = readWeb('apps/web/lib/unfiltered-mark.ts')
 const webWord = (/export const STATEMENT_NAME_WORD = '([^']+)'/.exec(markText) ?? /export const STATEMENT_MARK_LABEL = '([^']+)'/.exec(markText))?.[1]
 const studioLabel = (label) => (webWord && desktopWord ? label.replace(new RegExp(`\\b${webWord}\\b`, 'g'), desktopWord) : label)
 const studioOpen = (kind) => Object.entries(studioCatalogue)
-  .filter(([id, row]) => row.adult === true && row.kind === kind && row.sourceModel === undefined && !/-extend$/.test(id))
+  .filter(([id, row]) => row.adult === true && row.kind === kind && row.sourceModel === undefined && !/-extend$/.test(id) && !retiredIds.has(id))
   .map(([id, row]) => ({ id, label: studioLabel(row.label), studio: row }))
 const adultVideo = [...classicAdultVideo, ...studioOpen('video')]
 const creditsText = readWeb('apps/web/lib/billing/credits.ts')

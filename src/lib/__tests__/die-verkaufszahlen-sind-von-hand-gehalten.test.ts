@@ -46,7 +46,7 @@ const ERWARTET = {
   measuredChatModels: 36,
   flashModels: 12,
   flashDailyTokens: 500_000,
-  imageModels: 18,
+  imageModels: 17,
   videoModels: 32,
   // 13.09.2026, Verkaufs-Panel: die zwei Teilmengen ohne eingebaute
   // Inhaltsschranke (`adult: true` im Medienkatalog des Web-Repos) und die
@@ -68,7 +68,7 @@ const ERWARTET = {
   //
   // Ein Baum, der den Katalogumbau vom 13.09.2026 nicht hat, zaehlt sechs;
   // einer ohne den Create-Studio-Katalog zehn.
-  openImageModels: 9,
+  openImageModels: 8,
   openVideoModels: 17,
   hostedMonthlyEUR: 19,
   hostedCredits: 900_000,

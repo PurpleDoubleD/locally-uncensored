@@ -52,7 +52,7 @@ const neuesterAbschnitt = () => {
   const ende = text.indexOf('\n## [', start + 1)
   return ende === -1 ? text.slice(start) : text.slice(start, ende)
 }
-const ZAHLWORT: Record<number, string> = { 3: 'three', 6: 'six', 7: 'seven', 9: 'nine', 10: 'ten', 14: 'fourteen', 15: 'fifteen', 17: 'seventeen' }
+const ZAHLWORT: Record<number, string> = { 3: 'three', 6: 'six', 7: 'seven', 9: 'nine', 10: 'ten', 14: 'fourteen', 15: 'fifteen', 17: 'seventeen', 8: 'eight' }
 
 /**
  * Die alte Aussage, an ihrer Form erkannt statt an einem festen Satz: ein
@@ -200,9 +200,9 @@ describe('die Zahl der offenen Modelle', () => {
 
     // Die Herleitung aus dem Kommentar in cloud-pitch.ts, Zahl fuer Zahl.
     expect(teile('[data-open-video-row]', 'clipCredits')).toEqual({ klassisch: 11, ausDemStudio: 6 })
-    expect(teile('[data-open-image-row]', 'imageCredits')).toEqual({ klassisch: 3, ausDemStudio: 6 })
+    expect(teile('[data-open-image-row]', 'imageCredits')).toEqual({ klassisch: 3, ausDemStudio: 5 })
     expect(CLOUD_PITCH.openVideoModels).toBe(11 + 6)
-    expect(CLOUD_PITCH.openImageModels).toBe(3 + 6)
+    expect(CLOUD_PITCH.openImageModels).toBe(3 + 5)
   })
 
   it('und das Blatt liest die Zahl, statt sie zu tippen', () => {

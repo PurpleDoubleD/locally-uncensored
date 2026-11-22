@@ -124,7 +124,7 @@ export interface CloudPitchNumbers {
    * ## Herleitung der Sieben
    *
    *   * drei klassisch: `chroma`, `prefect-pony`, `neta-lumina`
-   *   * vier aus dem Studio: `z-image`, `nucleus-image`, `jib-mix-qwen`,
+   *   * aus dem Studio unter anderem: `z-image`, `jib-mix-qwen`,
    *     `wan-2.2-realism`
    *   * NICHT mit: `preset-chroma`, `preset-prefect-pony`,
    *     `preset-neta-lumina`, die drei Zwillinge mit `sourceModel`
@@ -217,9 +217,9 @@ export const CLOUD_PITCH: CloudPitchNumbers = {
   scoredAnswers: 188,
   flashModels: 12,
   flashDailyTokens: 500_000,
-  imageModels: 18,
+  imageModels: 17,
   videoModels: 32,
-  openImageModels: 9,
+  openImageModels: 8,
   openVideoModels: 17,
   hostedMonthlyEUR: 19,
   hostedCredits: 900_000,

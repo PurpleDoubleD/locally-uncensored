@@ -127,20 +127,6 @@
       "specialized": false
     },
     {
-      "id": "nucleus-image",
-      "name": "Nucleus",
-      "kind": "image",
-      "credits_per_run": 1000,
-      "full_wallet_runs": 900,
-      "runs_by_plan": {
-        "hosted": 900,
-        "hosted-pro": 2350,
-        "hosted-max": 5000
-      },
-      "seconds": null,
-      "specialized": false
-    },
-    {
       "id": "jib-mix-qwen",
       "name": "JibMix Qwen",
       "kind": "image",

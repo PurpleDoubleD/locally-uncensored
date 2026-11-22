@@ -83,7 +83,7 @@ describe('cloud pitch', () => {
     expect(cloudSalesLines()).toEqual([
       '13 No Filter chat models',
       '17 uncensored video models',
-      '9 uncensored image models',
+      '8 uncensored image models',
     ])
   })
 
