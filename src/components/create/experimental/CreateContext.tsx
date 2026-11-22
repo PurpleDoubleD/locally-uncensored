@@ -14,12 +14,22 @@ import { asComfyGpuMode, comfyCpuBannerText, type ComfyCpuBannerFacts } from '..
 import { installMlxStack } from '../../../api/mlx-install'
 import { listMlxLoras, MLX_LORAS_CHANGED, type MlxLoraAlpha, type MlxLoraKeys } from '../../../api/mlx-loras'
 import { useDownloadStore } from '../../../stores/downloadStore'
-import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, InstallCancelled } from '../../../lib/bundle-install'
+import { downloadBundleFiles, waitOrAbort, waitForModelsVisible, nodesAfterPackInstall, InstallCancelled } from '../../../lib/bundle-install'
 import { ensureLocalFilename } from './loadImage'
 import { batchReady, requestBatchStop, runBatchEdit } from './batchRun'
 import { comfyStartupError, nodePackLoadError, COMFY_INSTALLED_BUT_DEAD } from './comfyError'
 import { restartComfyForNewNodes } from '../../../api/comfy-restart'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
+
+/** What Create can do with the nodes this ComfyUI lists. */
+function capsFromNodes(names: Set<string>): Record<CreateCapability, boolean> {
+  return {
+    rmbg: names.has('RMBG'),
+    'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
+    dwpose: names.has('DWPreprocessor'),
+    depth: names.has('DepthAnythingV2Preprocessor'),
+  }
+}
 
 /** Hold until nothing is rendering, so a heal never lands on a live job.
  *  Bounded: a render that never reports finished must not park an install
@@ -248,13 +258,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     setVaeList(['auto', ...vaes])
     try {
       const nodes = await getAllNodeInfo(true)
-      const names = new Set(Object.keys(nodes))
-      setCaps({
-        rmbg: names.has('RMBG'),
-        'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
-        dwpose: names.has('DWPreprocessor'),
-        depth: names.has('DepthAnythingV2Preprocessor'),
-      })
+      setCaps(capsFromNodes(new Set(Object.keys(nodes))))
     } catch { /* node probe is best-effort */ }
     setCapsAsked(true)
   }, [connected, setCaps])
@@ -414,18 +418,12 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // is fetched by the node itself on the first run.
   const installCapability = useCallback(async (cap: CreateCapability, onProgress?: (msg: string) => void, signal?: AbortSignal) => {
     await ensureComfyRunning(onProgress, signal)
-    const capsFrom = (names: Set<string>) => ({
-      rmbg: names.has('RMBG'),
-      'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
-      dwpose: names.has('DWPreprocessor'),
-      depth: names.has('DepthAnythingV2Preprocessor'),
-    })
     if (cap === 'inpaint-nodes') {
       // Core ComfyUI nodes — nothing to clone. If they're still missing after
       // ComfyUI is up, the install is ancient; re-probe and say so honestly.
       const nodes = await getAllNodeInfo()
       const names = new Set(Object.keys(nodes))
-      setCaps(capsFrom(names))
+      setCaps(capsFromNodes(names))
       if (!names.has('VAEEncodeForInpaint') && !names.has('InpaintModelConditioning')) {
         throw new Error(
           'This ComfyUI is missing its core inpaint nodes (VAEEncodeForInpaint). Update ComfyUI to a current version.',
@@ -455,7 +453,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         const nodes = await getAllNodeInfo()
         const names = new Set(Object.keys(nodes))
         if (names.has(nodeClass)) {
-          setCaps(capsFrom(names))
+          setCaps(capsFromNodes(names))
           return
         }
       } catch { /* ComfyUI still restarting — keep polling */ }
@@ -510,6 +508,14 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         if (await checkComfyConnection()) break
       }
       clearNodeCache()
+      // The card for a missing pack reads these. Without this it asked for the
+      // pack just installed, and its button pulled it and restarted ComfyUI again.
+      const names = await nodesAfterPackInstall({
+        read: async () => new Set(Object.keys(await getAllNodeInfo(true))),
+        expected: packs.flatMap((key) => CUSTOM_NODE_REGISTRY[key]?.requiredNodes ?? []),
+        signal,
+      })
+      if (names) setCaps(capsFromNodes(names))
     }
     // Put the transfer in the header Downloads tray BEFORE the first byte.
     // Until now this path talked to the Rust downloader directly and never
@@ -616,7 +622,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         )
       }
     }
-  }, [ensureComfyRunning, fetchModels])
+  }, [ensureComfyRunning, fetchModels, setCaps])
 
   // Several source images (lib/batch-edit): Create runs the same single run
   // once per image, on the backend the batch started on.

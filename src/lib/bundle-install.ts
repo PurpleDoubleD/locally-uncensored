@@ -210,6 +210,35 @@ export async function downloadBundleFiles(files: BundleFile[], deps: DownloadDep
 }
 
 /**
+ * The node catalogue after a pack install and restart. A ComfyUI that is still
+ * coming up can fail the request or answer without the pack, so this asks again
+ * until the expected nodes are listed. When they never appear it returns the
+ * last real answer, and null when ComfyUI never gave one: the caller then keeps
+ * what it knew instead of reading silence as "not installed".
+ */
+export async function nodesAfterPackInstall(opts: {
+  read: () => Promise<Set<string>>
+  expected: string[]
+  signal?: AbortSignal
+  attempts?: number
+  waitMs?: number
+}): Promise<Set<string> | null> {
+  const { read, expected, signal, attempts = 10, waitMs = 2000 } = opts
+  let last: Set<string> | null = null
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await waitOrAbort(waitMs, signal)
+    try {
+      const names = await read()
+      if (names.size > 0) {
+        last = names
+        if (expected.every((node) => names.has(node))) return names
+      }
+    } catch { /* still restarting, ask again */ }
+  }
+  return last
+}
+
+/**
  * Wait until the running ComfyUI actually LISTS the files that were just
  * downloaded, and report what is still missing when it does not.
  *
