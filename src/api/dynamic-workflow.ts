@@ -3784,8 +3784,10 @@ export async function buildSceneWorkflow(params: LocalOpParams, seed: number, al
  *
  * The video is read at the run's frame rate (VHS_LoadVideo force_rate when
  * VideoHelperSuite is there, which LU installs for video output), so motion
- * and sound keep their speed; without it the core loader reads the first
- * frames and the clip runs at the video's own rate.
+ * and sound keep their speed. Without it the core nodes do the same: the clip
+ * is cut to the run's length and that stretch sampled evenly, whatever rate
+ * the video has. Only a ComfyUI too old for those nodes reads the first frames
+ * at the video's own rate.
  */
 export async function buildSwapWorkflow(params: LocalOpParams, seed: number, allNodes: NodePresence): Promise<ComfyApiGraph> {
   const workflow: ComfyApiGraph = {}
@@ -3836,6 +3838,7 @@ export async function buildSwapWorkflow(params: LocalOpParams, seed: number, all
   let frames: [string, number]
   let audio: [string, number]
   let outFps: number | [string, number] = fps
+  let runLength: number | [string, number] = length
   if (vhs) {
     workflow[videoId] = {
       class_type: 'VHS_LoadVideo',
@@ -3846,6 +3849,56 @@ export async function buildSwapWorkflow(params: LocalOpParams, seed: number, all
     }
     frames = [videoId, 0]
     audio = [videoId, 2]
+  } else if (allNodes['Video Slice'] && allNodes['VideoFrameSample']) {
+    workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
+    let cutSeconds: number | [string, number] = length / fps
+    if (allNodes['ComfyMathExpression']) {
+      // A video slower than the run has fewer frames than the run wants: it
+      // keeps its own rate, and the run makes only the frames it really has.
+      // The rate is read from a quarter second, so nothing big is decoded.
+      const probeId = String(n++)
+      workflow[probeId] = {
+        class_type: 'Video Slice',
+        inputs: { video: [videoId, 0], start_time: 0, duration: 0.25, strict_duration: false },
+      }
+      const probedId = String(n++)
+      workflow[probedId] = { class_type: 'GetVideoComponents', inputs: { video: [probeId, 0] } }
+      const rateId = String(n++)
+      workflow[rateId] = {
+        class_type: 'ComfyMathExpression',
+        inputs: { expression: swapRateExpression(fps), 'values.a': [probedId, 2] },
+      }
+      const countId = String(n++)
+      workflow[countId] = {
+        class_type: 'ComfyMathExpression',
+        inputs: { expression: swapFramesExpression(length, fps), 'values.a': [rateId, 0] },
+      }
+      const secondsId = String(n++)
+      workflow[secondsId] = {
+        class_type: 'ComfyMathExpression',
+        inputs: { expression: 'a / b', 'values.a': [countId, 0], 'values.b': [rateId, 0] },
+      }
+      runLength = [countId, 1]
+      cutSeconds = [secondsId, 0]
+      outFps = [rateId, 0]
+    }
+    const sliceId = String(n++)
+    workflow[sliceId] = {
+      class_type: 'Video Slice',
+      inputs: { video: [videoId, 0], start_time: 0, duration: cutSeconds, strict_duration: false },
+    }
+    const sampleId = String(n++)
+    workflow[sampleId] = {
+      class_type: 'VideoFrameSample',
+      inputs: { video: [sliceId, 0], num_frames: runLength, strategy: 'uniform', seed: 0 },
+    }
+    const sampledId = String(n++)
+    workflow[sampledId] = { class_type: 'GetVideoComponents', inputs: { video: [sampleId, 0] } }
+    // The sampled video has no sound, the cut one has exactly this stretch.
+    const soundId = String(n++)
+    workflow[soundId] = { class_type: 'GetVideoComponents', inputs: { video: [sliceId, 0] } }
+    frames = [sampledId, 0]
+    audio = [soundId, 1]
   } else {
     workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
     const componentsId = String(n++)
@@ -3909,7 +3962,7 @@ export async function buildSwapWorkflow(params: LocalOpParams, seed: number, all
     class_type: 'WanAnimateToVideo',
     inputs: {
       positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
-      width, height, length, batch_size: 1,
+      width, height, length: runLength, batch_size: 1,
       reference_image: [scaleId, 0], pose_video: [poseId, 0],
       background_video: [bgId, 0], character_mask: [maskId, 0],
       continue_motion_max_frames: 5, video_frame_offset: 0,
@@ -3933,6 +3986,17 @@ export async function buildSwapWorkflow(params: LocalOpParams, seed: number, all
 
   addVideoWithAudioOutput(workflow, n, decodeId, outFps, audio, allNodes, params.prompt || 'swap')
   return workflow
+}
+
+/** The rate a local Swap plays at, for ComfyMathExpression (a: the video's). */
+export function swapRateExpression(fps: number): string {
+  return `min(a, ${fps})`
+}
+
+/** The frames of a local Swap on Wan's 4n + 1 grid, never more than the video
+ *  has in the run's stretch (a: the rate from swapRateExpression). */
+export function swapFramesExpression(length: number, fps: number): string {
+  return `max(1, floor((min(${length}, floor(${length / fps} * a)) - 1) / 4)) * 4 + 1`
 }
 
 /** How far the skeleton is grown into a body mask: a tenth of the short side,

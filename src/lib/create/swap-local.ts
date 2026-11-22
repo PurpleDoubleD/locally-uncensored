@@ -8,7 +8,7 @@
 import type { ClassifiedModel } from '../../api/comfyui'
 import type { SwapFigure, SwapFrame } from '../../stores/createStore'
 import { SWAP_CONSENT_MISSING } from '../render/swap'
-import { checkPeople, peopleElsewhere, SWAP_LOCAL_MODEL } from './people-rule'
+import { checkPeople, peopleElsewhere, swapCan, SWAP_LOCAL_MODEL } from './people-rule'
 
 /** The local models Swap can run: the Wan 2.2 Animate files of the motion
  *  list. VACE follows a pose, it cannot keep the scene around a person. */
@@ -35,6 +35,20 @@ export function swapLocalProblem(s: {
   }
   if (!s.swapConsent) return SWAP_CONSENT_MISSING
   return null
+}
+
+/** How many frames the run makes: Wan's grid of 4n + 1, as much of the clip as
+ *  fits in the local limit and never longer than the clip. A clip whose length
+ *  could not be read counts as long enough. */
+export function swapLocalFrames(
+  clipSeconds: number | undefined,
+  fps: number,
+  maxSeconds = swapCan(SWAP_LOCAL_MODEL).maxSeconds,
+): number {
+  const rate = fps > 0 ? fps : 16
+  const longest = maxSeconds * rate + 1
+  const wanted = clipSeconds && clipSeconds > 0 ? Math.min(clipSeconds * rate, longest) : longest
+  return Math.max(1, Math.floor((wanted - 1) / 4)) * 4 + 1
 }
 
 /** The size of the run: the lane's size, turned to the video (a portrait

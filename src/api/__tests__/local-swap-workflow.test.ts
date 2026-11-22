@@ -1,7 +1,7 @@
 // Swap Character on this computer (3.1.3): Wan 2.2 Animate in replace mode,
 // with a mask made from the DWPose skeleton by ComfyUI's core mask nodes.
 import { describe, it, expect, vi } from 'vitest'
-import { buildSwapWorkflow, swapMaskGrow, WorkflowUnavailableError, type LocalOpParams } from '../dynamic-workflow'
+import { buildSwapWorkflow, swapFramesExpression, swapMaskGrow, swapRateExpression, WorkflowUnavailableError, type LocalOpParams } from '../dynamic-workflow'
 import type { ComfyApiGraph, ComfyApiNode } from '../../types/comfy-graph'
 
 vi.mock('../comfyui', async (importOriginal) => {
@@ -59,7 +59,50 @@ describe('buildSwapWorkflow', () => {
     expect(of(wf, 'CreateVideo')[1].inputs).toMatchObject({ audio: [vid, 2], fps: 16 })
   })
 
-  it('without VideoHelperSuite: the core loader, and the clip keeps the video\'s own rate', async () => {
+  it('without VideoHelperSuite: the core nodes cut the clip and sample it at the run\'s rate', async () => {
+    const wf = await buildSwapWorkflow(params({ frames: 81 }), 7, nodes('Video Slice', 'VideoFrameSample'))
+    const [load] = of(wf, 'LoadVideo')
+    const [slice, cut] = of(wf, 'Video Slice')
+    const [sample, sampled] = of(wf, 'VideoFrameSample')
+    expect(cut.inputs).toMatchObject({ video: [load, 0], start_time: 0, duration: 81 / 16, strict_duration: false })
+    expect(sampled.inputs).toMatchObject({ video: [slice, 0], num_frames: 81, strategy: 'uniform' })
+    const comps = Object.entries(wf).filter(([, x]) => x.class_type === 'GetVideoComponents') as [string, Node][]
+    const picture = comps.find(([, x]) => (x.inputs.video as unknown[])[0] === sample)![0]
+    const sound = comps.find(([, x]) => (x.inputs.video as unknown[])[0] === slice)![0]
+    expect(of(wf, 'ImageScale')[1].inputs.image).toEqual([picture, 0])
+    expect(of(wf, 'CreateVideo')[1].inputs).toMatchObject({ audio: [sound, 1], fps: 16 })
+  })
+
+  it('with the math node: the frames, the cut and the output rate all follow the video', async () => {
+    const wf = await buildSwapWorkflow(params({ frames: 81 }), 7, nodes('Video Slice', 'VideoFrameSample', 'ComfyMathExpression'))
+    const maths = Object.entries(wf).filter(([, x]) => x.class_type === 'ComfyMathExpression') as [string, Node][]
+    const rate = maths.find(([, x]) => x.inputs.expression === swapRateExpression(16))![0]
+    const count = maths.find(([, x]) => x.inputs.expression === swapFramesExpression(81, 16))![0]
+    const seconds = maths.find(([, x]) => x.inputs.expression === 'a / b')![0]
+    const cut = Object.values(wf).filter((x) => x.class_type === 'Video Slice').map((x) => (x as Node).inputs.duration)
+    expect(cut).toContainEqual([seconds, 0])
+    expect(of(wf, 'VideoFrameSample')[1].inputs.num_frames).toEqual([count, 1])
+    expect(of(wf, 'WanAnimateToVideo')[1].inputs.length).toEqual([count, 1])
+    expect(of(wf, 'CreateVideo')[1].inputs.fps).toEqual([rate, 0])
+  })
+
+  // The expressions as ComfyUI evaluates them: min, max and floor over numbers.
+  const evaluate = (expression: string, a: number): number =>
+    new Function('min', 'max', 'floor', 'a', `return ${expression}`)(Math.min, Math.max, Math.floor, a) as number
+
+  it.each([[60, 16, 81], [30, 16, 81], [24, 16, 81], [16, 16, 81], [15, 15, 73], [12, 12, 57], [8, 8, 37]])(
+    'a %i fps video plays at %i fps with %i frames, at its real speed',
+    (source, rate, frames) => {
+      const played = evaluate(swapRateExpression(16), source)
+      const count = evaluate(swapFramesExpression(81, 16), played)
+      expect([played, count]).toEqual([rate, frames])
+      expect((count - 1) % 4).toBe(0)
+      expect(count / played).toBeLessThanOrEqual(81 / 16)
+      expect(count).toBeLessThanOrEqual(Math.floor((81 / 16) * source))
+    },
+  )
+
+  it('a ComfyUI without those nodes: the core loader, and the clip keeps the video\'s own rate', async () => {
     const wf = await buildSwapWorkflow(params(), 7, nodes())
     const [comp] = of(wf, 'GetVideoComponents')
     expect(of(wf, 'CreateVideo')[1].inputs).toMatchObject({ audio: [comp, 1], fps: [comp, 2] })

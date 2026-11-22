@@ -143,7 +143,8 @@ import { LongRunStopped, longVideoRequest, runLongVideo, type ClipItem } from '.
 import { settleSeams } from '../api/video-settle'
 import { ownWorkflowMisfitNote } from '../lib/own-workflow-fit'
 import { ensureLocalFilename, loadImageRef } from '../components/create/experimental/loadImage'
-import { swapLocalModels, swapLocalProblem, swapLocalSize, SWAP_LOCAL_NO_MODEL } from '../lib/create/swap-local'
+import { swapLocalFrames, swapLocalModels, swapLocalProblem, swapLocalSize, SWAP_LOCAL_NO_MODEL } from '../lib/create/swap-local'
+import { mediaSeconds } from '../components/create/experimental/useStudioPrice'
 import { listMlxLoras } from '../api/mlx-loras'
 import {
   getVideoStatus, listVideoModels, generateVideo, getVideoProgress, cancelVideo,
@@ -2144,6 +2145,12 @@ export function useCreate() {
         }
         setProgress(5, 'Building workflow...')
         const laneDefaults = COMFY_MODEL_DEFAULTS[imageModelType] ?? COMFY_MODEL_DEFAULTS.unknown
+        if (localOp === 'swap' && state.videoInput) {
+          laneFrames = swapLocalFrames(
+            await mediaSeconds(state.videoInput.url, 'video'),
+            mode === 'video' ? fps : laneDefaults.fps,
+          )
+        }
         // The lanes carry the same version gate as a picture (YuE2, S2V,
         // Animate): a too-old ComfyUI is offered the update, then the build
         // runs again. The box, 03.10.2026: Music failed with the update
