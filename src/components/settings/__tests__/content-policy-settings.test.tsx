@@ -123,14 +123,17 @@ describe('ContentPolicySettings', () => {
   it('verspricht keine Meldung, die niemand verschickt', () => {
     render(<ContentPolicySettings />)
     const text = document.body.textContent ?? ''
-    expect(text).toMatch(/refused on every request whatever this is set to\./)
+    expect(text).toMatch(/Material involving minors is refused on every request\./)
     expect(text).not.toMatch(/and reported/i)
   })
 
   it('NEGATIVKONTROLLE: die Sperre selbst steht unveraendert da', () => {
     render(<ContentPolicySettings />)
     const text = document.body.textContent ?? ''
-    expect(text).toMatch(/Material involving minors, and photographs of real people uploaded without their consent, are refused on every request/)
+    expect(text).toMatch(/Material involving minors is refused on every request\./)
+    expect(text).toMatch(/Uploading photographs of real people without their consent is not allowed\./)
+    // LU has no technical check on photos of real adults, so no sentence may claim one.
+    expect(text).not.toMatch(/photographs? of real[^.]*\b(refused|rejected|blocked|detected)\b/i)
   })
 
   it('says plainly that the local machine is not affected', () => {

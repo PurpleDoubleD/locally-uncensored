@@ -182,8 +182,8 @@ export function ContentPolicySettings() {
       {error && <p className={`text-[0.6rem] ${HINWEIS_TEXT.fehler}`} role="alert">{error}</p>}
 
       <p className="text-[0.6rem] text-gray-500 leading-relaxed">
-        Material involving minors, and photographs of real people uploaded without their consent,
-        are refused on every request whatever this is set to.
+        Material involving minors is refused on every request. Uploading photographs of real
+        people without their consent is not allowed.
       </p>
     </div>
   )
