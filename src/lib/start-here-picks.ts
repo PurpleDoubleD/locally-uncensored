@@ -14,6 +14,11 @@
 // (lib/text-download-target ollamaOnlyDownloadBlock).
 //
 // The entry stays in the list below, with its name saying what it needs.
+//
+// An entry can also be held back by the catalogue. Picks tie often and the
+// newest release wins a tie, so a brand-new model would take the first place
+// without anyone having chosen it. Inkling 2 Mini is held back this way while
+// its runs on Windows and the standing of its usage policy are open.
 
 /** An entry that is pulled by its Ollama tag and has no file of its own. */
 export function needsOllama(model: { ollamaModel?: string }): boolean {
@@ -21,6 +26,7 @@ export function needsOllama(model: { ollamaModel?: string }): boolean {
 }
 
 /** Whether this entry may be a "Start here" pick. */
-export function mayBeStartHerePick(model: { ollamaModel?: string }, host: { ollamaEnabled: boolean }): boolean {
+export function mayBeStartHerePick(model: { ollamaModel?: string; notFirstPick?: boolean }, host: { ollamaEnabled: boolean }): boolean {
+  if (model.notFirstPick) return false
   return !(needsOllama(model) && !host.ollamaEnabled)
 }

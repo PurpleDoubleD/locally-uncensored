@@ -1294,7 +1294,7 @@ export function getMainstreamTextModels(): DiscoverModel[] {
     // Ollama's only build: latest, 26b-a5b and 26b-a5b-nvfp4 are one manifest of
     // 20.19 GB NVFP4 safetensors with `requires: 0.40.17` (registry, 21.11.2026).
     // Safetensors run on Ollama's MLX runner, hence the MLX tag: Mac only.
-    { name: 'Inkling 2 Mini (Ollama)', description: 'Thinking Machines Inkling 2 Mini · vision + tools + thinking. Apple Silicon, needs Ollama 0.40.17 or newer.', pulls: '', tags: ['26B', 'Vision', 'Tools', 'MLX', 'NVFP4', '19 GB'], updated: 'New', agent: true, released: '2026-11', ollamaModel: 'inkling-2-mini', minOllama: '0.40.17', sizeGB: 18.8, usagePolicyUrl: INKLING_USAGE_POLICY },
+    { name: 'Inkling 2 Mini (Ollama)', description: 'Thinking Machines Inkling 2 Mini · vision + tools + thinking. Apple Silicon, needs Ollama 0.40.17 or newer.', pulls: '', tags: ['26B', 'Vision', 'Tools', 'MLX', 'NVFP4', '19 GB'], updated: 'New', agent: true, released: '2026-11', ollamaModel: 'inkling-2-mini', minOllama: '0.40.17', sizeGB: 18.8, usagePolicyUrl: INKLING_USAGE_POLICY, notFirstPick: true },
     // ── Qwen 3.8 (August 2026) ──
     // Qwen shipped no GGUF of its own, so the 27B rides on unsloth's dynamic
     // quants (the most-downloaded conversion by a wide margin). Every 27B entry

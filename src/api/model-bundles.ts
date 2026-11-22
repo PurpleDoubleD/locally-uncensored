@@ -78,6 +78,7 @@ export interface DiscoverModel {
   ollamaModel?: string    // Ollama model tag for `ollama pull` (e.g. 'qwen3.6')
   minOllama?: string      // Oldest Ollama that runs it (`requires` in the manifest config)
   usagePolicyUrl?: string // The maker's usage policy, when it adds terms to the licence
+  notFirstPick?: boolean  // Stays in the list, but "Start here" does not recommend it (lib/start-here-picks)
   // Model Hub grouping (2.5.8 redesign): entries that are the SAME model in a
   // different quant share a `group` and render as ONE card with a size picker.
   // Different parameter sizes stay separate cards on purpose.

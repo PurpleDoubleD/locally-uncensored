@@ -33,6 +33,21 @@ describe('a first pick', () => {
     }
   })
 
+  it('is never Inkling 2 Mini, with or without Ollama, and the list below keeps it', () => {
+    const inkling = getMainstreamTextModels().filter((m) => /^Inkling 2 Mini/.test(m.name))
+    expect(inkling.length).toBeGreaterThan(1)
+    for (const m of inkling) {
+      expect(mayBeStartHerePick(m, { ollamaEnabled: true }), m.name).toBe(false)
+      expect(mayBeStartHerePick(m, { ollamaEnabled: false }), m.name).toBe(false)
+    }
+  })
+
+  it('COUNTER-CHECK: no other catalogue entry is held back', () => {
+    const others = [...getMainstreamTextModels(), ...getUncensoredTextModels()].filter((m) => !/^Inkling 2 Mini/.test(m.name))
+    expect(others.length).toBeGreaterThan(0)
+    for (const m of others) expect(m.notFirstPick, m.name).toBeUndefined()
+  })
+
   it('asks no platform', () => {
     const rule = readFileSync(resolve(__dirname, '../start-here-picks.ts'), 'utf-8')
     expect(rule).not.toMatch(/isMacOS|isMlxImageHost|hostIsMac|mac:/)

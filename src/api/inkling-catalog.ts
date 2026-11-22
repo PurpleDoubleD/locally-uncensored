@@ -52,7 +52,7 @@ const ENTRIES: DiscoverModel[] = [
 ]
 
 export function inklingEntriesUngated(): DiscoverModel[] {
-  return ENTRIES.map((m) => ({ ...m, tags: [...m.tags] }))
+  return ENTRIES.map((m) => ({ ...m, tags: [...m.tags], notFirstPick: true }))
 }
 
 export function inklingCatalogEntries(engineLoaded: boolean = INKLING_ENGINE_LOADED): DiscoverModel[] {
