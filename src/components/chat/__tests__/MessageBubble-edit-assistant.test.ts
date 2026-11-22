@@ -54,7 +54,7 @@ describe('assistant edit, component wiring (source guards)', () => {
     // turn would overwrite the edit a frame later.
     expect(src).toContain('!hasRealAnswerBlocks')
     expect(src).toMatch(/canEditAssistant = !isUser && !hasRealAnswerBlocks/)
-    expect(src).toContain('(!isLast || !!message.usage)')
+    expect(src).toContain('!isStreaming && !replyStillWriting')
   })
 
   it('the edit textarea opens for both roles, not only the user', () => {

@@ -6,6 +6,7 @@ import { canonicalArgs, repeatLabel, skippedRepeatsNote } from '../lib/agent-cor
 import { replayableReasoning } from '../lib/agent-core/reasoning-replay'
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { frameFlush } from '../lib/frame-flush'
+import { beginReplyWrite } from '../stores/replyWriteStore'
 import { useRunActivityStore, toolProgressActivity, waitBeforeRetry, readingActivity, endFirstWait, hiddenThoughtArrived, waitForChatCard } from '../stores/runActivityStore'
 import { watchChatFirstWait } from '../lib/first-wait-vram'
 import { markCannotThink } from '../lib/model-compatibility'
@@ -923,6 +924,8 @@ export function useAgentChat() {
     // without a word or parked in a steer queue no run would ever read, and
     // Stop showed in every chat. The Code tab has had this net for a while.
     let laneOutcome: Awaited<ReturnType<typeof runInLane>> | undefined
+    // Edit stays shut until nothing can write this answer (stores/replyWriteStore.ts).
+    let endReplyWrite = () => {}
     try {
     laneOutcome = await runInLane(
       { conversationId: convId, lane, abort: () => abort.abort() },
@@ -1089,6 +1092,7 @@ export function useAgentChat() {
       agentBlocks: [],
     }
     useChatStore.getState().addMessage(convId, assistantMessage)
+    endReplyWrite = beginReplyWrite(assistantMessage.id)
     // The request's sum over every model call of this run, the line under
     // the answer (lib/request-usage). `usage` keeps only the last call.
     const requestUsage = requestUsageTracker(convId, assistantMessage.id)
@@ -4154,6 +4158,7 @@ export function useAgentChat() {
         CHAT_NOTICE_MS,
       )
     } finally {
+    endReplyWrite()
     // Whatever way the body ended, a claim still held by THIS run is a leak:
     // the loop's own finally deletes it on every path it reaches. Identity
     // checked, so a newer run on the same conversation is never touched.

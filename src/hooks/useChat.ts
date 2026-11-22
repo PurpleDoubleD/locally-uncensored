@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react"
 import { noteSentSystemPrompt } from '../stores/contextBreakdownStore'
 import { create } from "zustand"
 import { frameFlush } from '../lib/frame-flush'
+import { beginReplyWrite } from '../stores/replyWriteStore'
 import { sendWindowFor } from '../lib/send-window'
 import { markCannotThink } from '../lib/model-compatibility'
 import { v4 as uuid } from "uuid"
@@ -156,6 +157,17 @@ export function wantsWatcherTools(content: string, history: readonly Message[], 
  *  group is talk between models; every knob it skips belongs to the
  *  single-model paths and their tests. */
 async function runGroupTurn(convId: string, model: string, allModels: string[], abort: AbortController) {
+  // Held to the very end of the turn, so Edit stays shut until nothing can
+  // write into this bubble any more (stores/replyWriteStore.ts).
+  let endWrite = () => {}
+  try {
+    await writeGroupTurn(convId, model, allModels, abort, (id) => { endWrite = beginReplyWrite(id) })
+  } finally {
+    endWrite()
+  }
+}
+
+async function writeGroupTurn(convId: string, model: string, allModels: string[], abort: AbortController, replyStarted: (id: string) => void) {
   const { settings } = useSettingsStore.getState()
   const conv = useChatStore.getState().conversations.find((c) => c.id === convId)
   if (!conv) return
@@ -178,6 +190,7 @@ async function runGroupTurn(convId: string, model: string, allModels: string[], 
     timestamp: Date.now(),
   }
   useChatStore.getState().addMessage(convId, assistantMessage)
+  replyStarted(assistantMessage.id)
 
   // Der Grundtext gilt unabhaengig vom Personenschalter: der Schalter
   // entscheidet ueber die PERSON, nicht darueber, ob ueberhaupt ein Systemtext
@@ -1253,6 +1266,7 @@ export function useChat() {
     // right after this comment, and the `cancelled-while-queued` follow-up
     // at the end all check `activeChatRuns.get(convId) === myRunToken`
     // first); it only fires on a path the body never reaches.
+    let endReplyWrite = () => {}
     try {
     const memoryScope = store.conversations.find(c => c.id === convId)?.memoryScope
     const memoryChatOff = store.conversations.find(c => c.id === convId)?.memoryOff === true
@@ -1300,6 +1314,7 @@ export function useChat() {
       timestamp: Date.now(),
     }
     useChatStore.getState().addMessage(convId, assistantMessage)
+    endReplyWrite = beginReplyWrite(assistantMessage.id)
 
     const conv = useChatStore.getState().conversations.find((c) => c.id === convId)
     if (!conv) {
@@ -2319,6 +2334,7 @@ export function useChat() {
         setIsGenerating(activeChatRuns.size > 0)
       }
       clearSendPending(convId, myRunToken)
+      endReplyWrite()
     }
     // Alle drei Referenzen sind konstant: `extractAndSave` kommt aus dem
     // Modul-Singleton MEMORY_API, `runGroupRound` ist ein useCallback mit
