@@ -66,6 +66,26 @@ describe('Edit on the last answer', () => {
   })
 })
 
+describe('the thinking line of the last answer', () => {
+  const thought = (over: Partial<Message> = {}) => answer({ content: '', thinking: 'Reasoning about it', ...over })
+  const live = () => !!document.querySelector('.lu-tool-shimmer')
+
+  it('moves while the answer streams', () => {
+    render(<MessageBubble message={thought()} isLast isStreaming />)
+    expect(live()).toBe(true)
+  })
+
+  it('stands still after a Stop that left only thoughts and no token numbers', () => {
+    render(<MessageBubble message={thought()} isLast />)
+    expect(live()).toBe(false)
+  })
+
+  it('stands still once the numbers are in, as before', () => {
+    render(<MessageBubble message={thought({ usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } })} isLast isStreaming />)
+    expect(live()).toBe(false)
+  })
+})
+
 describe('the write mark', () => {
   it('ending twice is harmless and two writers on one id both count', () => {
     const first = beginReplyWrite('a1')
