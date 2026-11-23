@@ -140,6 +140,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
   - Handbook chapter, Settings and troubleshooting: https://locallyuncensored.com/guide/settings-and-troubleshooting/
   - Handbook chapter, FAQ and glossary: https://locallyuncensored.com/guide/faq-and-glossary/
 - Blog (guides, comparisons, release notes): https://locallyuncensored.com/blog/
+- How to Steer a Local LLM With Neuron Sliders: https://locallyuncensored.com/blog/steer-local-llm-neurons.html
 - Qwen-Image 2.1 uncensored (local setup, community builds, GGUF sizes, LoRAs, research licence): https://locallyuncensored.com/qwen-image-2-1/
 - Qwen 3.8 uncensored (abliterated and heretic builds of Qwen 3.8 27B, GGUF sizes by VRAM): https://locallyuncensored.com/qwen-3-8-uncensored/
 - Locally Uncensored for Mac (Apple Silicon, macOS 14 or newer, beta): https://locallyuncensored.com/mac/

@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url><loc>https://locallyuncensored.com/</loc><lastmod>2026-11-15</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
   <url><loc>https://locallyuncensored.com/guide/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/</loc><lastmod>2026-11-05</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/</loc><lastmod>2026-11-23</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/remote-access/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/alternatives/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://locallyuncensored.com/mac/</loc><lastmod>2026-11-05</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -164,4 +164,5 @@
   <url><loc>https://locallyuncensored.com/blog/ia-sin-censura-local.html</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.7</priority><xhtml:link rel="alternate" hreflang="en" href="https://locallyuncensored.com/blog/run-uncensored-ai-locally.html"/><xhtml:link rel="alternate" hreflang="de" href="https://locallyuncensored.com/blog/unzensierte-ki-lokal.html"/><xhtml:link rel="alternate" hreflang="pt-BR" href="https://locallyuncensored.com/blog/ia-sem-censura-local.html"/><xhtml:link rel="alternate" hreflang="es" href="https://locallyuncensored.com/blog/ia-sin-censura-local.html"/><xhtml:link rel="alternate" hreflang="x-default" href="https://locallyuncensored.com/blog/run-uncensored-ai-locally.html"/></url>
   <url><loc>https://locallyuncensored.com/android/</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>
   <url><loc>https://locallyuncensored.com/ios/</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/steer-local-llm-neurons.html</loc><lastmod>2026-11-23</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
 </urlset>

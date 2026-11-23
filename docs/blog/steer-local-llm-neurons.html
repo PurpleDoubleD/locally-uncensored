@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Steer a Local LLM With Neuron Sliders: A Practical Guide</title>
+<meta name="description" content="Change how a local model answers without touching its prompt or weights: ready-made sliders, your own from examples, SAE features and shareable coordinates.">
+<meta name="keywords" content="steer local llm, activation steering, control vectors llama.cpp, llm neuron sliders, sparse autoencoder features, gemma scope local, steering vectors gguf">
+<meta property="og:title" content="How to Steer a Local LLM With Neuron Sliders">
+<meta property="og:description" content="Change how a local model answers without touching its prompt or weights: ready-made sliders, your own from examples, SAE features and shareable coordinates.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/steer-local-llm-neurons.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-11-23">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Guide">
+<meta property="article:tag" content="Neurons">
+<meta property="article:tag" content="Steering">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How to Steer a Local LLM With Neuron Sliders">
+<meta name="twitter:description" content="Change how a local model answers without touching its prompt or weights: ready-made sliders, your own from examples, SAE features and shareable coordinates.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/steer-local-llm-neurons.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to Steer a Local LLM With Neuron Sliders","description":"Change how a local model answers without touching its prompt or weights: ready-made sliders, your own from examples, SAE features and shareable coordinates.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-11-23","dateModified":"2026-11-23","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/steer-local-llm-neurons.html"},"keywords":"steer local llm, activation steering, control vectors llama.cpp, llm neuron sliders, sparse autoencoder features, gemma scope local, steering vectors gguf","url":"https://locallyuncensored.com/blog/steer-local-llm-neurons.html"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Does steering change the model file?","acceptedAnswer":{"@type":"Answer","text":"No. The direction is applied while the model runs. Put the slider at 0, or turn Neurons off under Plugins, and the engine runs without it."}},{"@type":"Question","name":"Do tools still work with Neurons on?","acceptedAnswer":{"@type":"Answer","text":"Yes. The sliders act inside the model and not on the tools. At high strength a model can lose track of its task, so keep Agent and Code around ±0.5."}},{"@type":"Question","name":"Can I steer a model in Ollama or LM Studio?","acceptedAnswer":{"@type":"Answer","text":"No. Those programs take no control vectors from LU. Load the same model in the LU Engine instead."}},{"@type":"Question","name":"Which models have searchable features?","acceptedAnswer":{"@type":"Answer","text":"Gemma 3 270M, 1B, 4B and 12B IT, through Gemma Scope 2. Ready-made and own sliders work on other supported LU Engine chat models as well."}},{"@type":"Question","name":"Are shared coordinates safe to paste?","acceptedAnswer":{"@type":"Answer","text":"LU reads only numbers and example sentences from them, never files, addresses or commands. A strong recipe can still make a model's answers worse, so check it with Compare."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"How to Steer a Local LLM With Neuron Sliders","item":"https://locallyuncensored.com/blog/steer-local-llm-neurons.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">4200+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Guide</span>
+    <span>November 2026</span>
+    <span>&middot;</span>
+    <span>7 min read</span>
+  </div>
+
+  <article>
+    <h1>How to Steer a Local LLM With Neuron Sliders</h1>
+
+    <p>Steering changes how a model answers by pushing on its inner activity while it writes. Your prompt stays the same and the weights on disk stay the same. Locally Uncensored has this as a plugin called Neurons: sliders such as Serious to Cheerful, your own sliders made from a few example lines, and a before and after on the same question.</p>
+
+    <p>This guide covers what each part does, how to use it, and where it stops working.</p>
+
+    <div class="callout info"><div class="callout-title">The short version</div>
+    <p>Turn on Neurons under Plugins in Chat, Agent or Code. Pick a model in the LU Engine, move one slider to about 0.5, and run Compare. At 0 the model is exactly as it was.</p>
+    </div>
+
+    <h2>What Steering Is</h2>
+
+    <p>A model passes your words through many layers. Each layer holds a long list of numbers, and some directions in that space line up with traits like formal or cheerful. Steering adds a small amount of such a direction while the model generates. LU does this with control vectors, which <a href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener">llama.cpp</a> supports directly.</p>
+
+    <table>
+      <thead><tr><th>Method</th><th>What changes</th><th>Can you undo it?</th></tr></thead>
+      <tbody>
+        <tr><td>System prompt</td><td>The text the model reads</td><td>Edit the text</td></tr>
+        <tr><td>Steering</td><td>Inner activity while it writes</td><td>Slider to 0</td></tr>
+        <tr><td>Fine-tune or LoRA</td><td>The weights, through training</td><td>Remove it or go back to the original</td></tr>
+        <tr><td><a href="abliterated-models-guide.html">Abliteration</a></td><td>The weights, by removing a direction</td><td>Go back to the original</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Turn It On</h2>
+
+    <ol>
+      <li>Open Plugins in Chat, Agent or Code and switch on Neurons. A window opens next to your chat.</li>
+      <li>Pick a chat model that runs in the LU Engine. If you have none, download one or add a GGUF file from your drive.</li>
+      <li>The first time, a five-card introduction explains the idea. You can skip it and bring it back later.</li>
+    </ol>
+
+    <p>Models in Ollama, LM Studio and the cloud do not work here, because those programs take no control vectors from LU. To steer one of them, load the same model in the LU Engine.</p>
+
+    <h2>Ready-Made Sliders</h2>
+
+    <p>Among them:</p>
+
+    <pre><code>Sober          &lt;-&gt;  Creative
+Concise        &lt;-&gt;  Detailed
+Formal         &lt;-&gt;  Casual
+Serious        &lt;-&gt;  Cheerful</code></pre>
+
+    <p>A direction from one model means nothing in another, so LU computes each slider on your model the first time you use it. It reads short example pairs through the model, then measures how far it can push before answers break. That takes seconds on small models and a few minutes on large ones. The chat pauses meanwhile, and if a run will take longer than two minutes, LU says so first.</p>
+
+    <p>The scale runs from -1 to +1. LU places ±1 just under the point where the measured answer started to break.</p>
+
+    <h2>Your Own Slider From Examples</h2>
+
+    <p>Under Add slider, write a few lines for "more like this" and a few for "less like this":</p>
+
+    <pre><code>More:  Talk like a pirate.
+       Say arr and matey.
+
+Less:  Talk in plain modern English.</code></pre>
+
+    <p>Three to ten lines per side are plenty. Keep both sides alike except for the trait, or the slider picks up the other differences too. Models under 1B show traits weakly, and something as specific as a pirate voice needs a bigger model.</p>
+
+    <h2>Features: Search What the Model Knows</h2>
+
+    <p>A sparse autoencoder splits one layer's activity into thousands of features. Turning a feature up adds its direction to that layer. LU uses Google DeepMind's Gemma Scope 2 (CC-BY-4.0), so features exist for four models:</p>
+
+    <pre><code>Gemma 3 270M IT   layer 9    16k features
+Gemma 3 1B IT     layer 13   16k features
+Gemma 3 4B IT     layer 17   16k features
+Gemma 3 12B IT    layer 24   16k features</code></pre>
+
+    <p>Search a word like ocean, or a number like #1234. Each feature is named by the ten tokens it pushes most. Some read clearly and many do not, and LU does not invent labels for them. It downloads only the parts it needs from the official files and checks each one against a pinned SHA-256.</p>
+
+    <h2>Coordinates: Share a Mix in One Line</h2>
+
+    <p>Your sliders can be copied as a short line or a link. Paste someone else's under Add slider, Coordinates.</p>
+
+    <pre><code>@cheerful+0.5     ready-made slider, works on any supported model
+F11690+0.8        feature 11690 of the model's autoencoder
+L13N7956-1.0      layer 13, MLP neuron 7956, pushed down by 1
+13:7956:-1.0      the same neuron, another common notation</code></pre>
+
+    <p>A line can name its model, as in <code>Qwen3.5-4B: L13N7956-1.0 L14N8949+1.0</code>. Feature and neuron numbers belong to one model, so LU tells you which values can run on yours and why the others cannot. Using a recipe replaces your current sliders, and you can undo it.</p>
+
+    <p>LU reads only numbers and example sentences from a recipe, never files, addresses or commands. Anything that does not fit the format is refused with the reason.</p>
+
+    <p>Single neurons need a model with a fixed feed-forward layer. In a mixture-of-experts model each word goes through a few of many experts, so a neuron has no fixed place and LU says so. Neuron doses go up to ±3, but shared recipes stay within about ±1.2, and ±3 already wrecks any model.</p>
+
+    <h2>Compare Before and After</h2>
+
+    <p>Compare asks one question twice, with the sliders off and on, using the same seed at temperature 0. The two answers appear side by side, so the difference comes from the sliders. The engine restarts twice for this. Use it every time you change a mix.</p>
+
+    <h2>Settings That Hold Up</h2>
+
+    <table>
+      <thead><tr><th>Setting</th><th>What to expect</th></tr></thead>
+      <tbody>
+        <tr><td>One slider up to ±0.75</td><td>The normal working range</td></tr>
+        <tr><td>Agent and Code tasks</td><td>Stay around ±0.5</td></tr>
+        <tr><td>Any slider above ±0.75, or a total above 1</td><td>LU warns: stronger effect, more odd or repeating text</td></tr>
+        <tr><td>A total above 1.5</td><td>LU warns: answers may fall apart and agents may stop following the task</td></tr>
+      </tbody>
+    </table>
+
+    <p>Sliders are saved per model and survive a restart. A persona can have its own set, which wins over the model's. In a group chat the model's sliders apply to every speaker.</p>
+
+    <h2>Limits</h2>
+
+    <ul>
+      <li><strong>LU Engine only.</strong> No Ollama, LM Studio or cloud models.</li>
+      <li><strong>Not every model.</strong> A few architectures are excluded and LU refuses them. Embedding models cannot be steered.</li>
+      <li><strong>Originals work best.</strong> On a model that was changed before, such as an abliterated or merged one, sliders may come out weaker or fail. LU warns you and can point to the original.</li>
+      <li><strong>A change is a restart.</strong> llama-server cannot swap control vectors while it runs, so each change takes a few seconds.</li>
+      <li><strong>Steering shifts behavior.</strong> It adds no knowledge and no skill the model did not already have.</li>
+    </ul>
+
+    <h2>FAQ</h2>
+
+    <h3>Does steering change the model file?</h3>
+    <p>No. The direction is applied while the model runs. Put the slider at 0, or turn Neurons off under Plugins, and the engine runs without it.</p>
+
+    <h3>Do tools still work with Neurons on?</h3>
+    <p>Yes. The sliders act inside the model and not on the tools. At high strength a model can lose track of its task, so keep Agent and Code around ±0.5.</p>
+
+    <h3>Can I steer a model in Ollama or LM Studio?</h3>
+    <p>No. Those programs take no control vectors from LU. Load the same model in the LU Engine instead.</p>
+
+    <h3>Which models have searchable features?</h3>
+    <p>Gemma 3 270M, 1B, 4B and 12B IT, through Gemma Scope 2. Ready-made and own sliders work on other supported LU Engine chat models as well.</p>
+
+    <h3>Are shared coordinates safe to paste?</h3>
+    <p>LU reads only numbers and example sentences from them, never files, addresses or commands. A strong recipe can still make a model's answers worse, so check it with Compare.</p>
+
+    <h2>Related</h2>
+
+    <ul>
+      <li><a href="abliterated-models-guide.html">Abliterated models: what they are and what they change</a></li>
+      <li><a href="local-ai-reverse-engineering.html">Reverse engineering with a local model</a></li>
+      <li><a href="talk-to-local-llm-voice-chat.html">Talk to a local LLM by voice</a></li>
+      <li><a href="/guide/">The Locally Uncensored handbook</a></li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>Locally Uncensored is free, open source and runs on your own machine</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:0">
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.2_x64-setup.exe" class="cta-btn" download>Download for Windows</a>
+      <a data-mac-latest href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.2/LU_3.1.2_aarch64.dmg" class="cta-btn" download>Download for Mac (Apple Silicon)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.2_amd64.AppImage" class="cta-btn" download>Download for Linux</a>
+    </p>
+    <p style="margin-top:14px;margin-bottom:0">No GPU? LU Cloud runs in a browser, paid from credit packs that start at 15 EUR and need no subscription. <a href="/pricing/">See what it costs</a> or <a href="https://lu-labs.ai/pricing?tab=credits&amp;src=luc-local-ai-reverse-enginee-end" target="_blank" rel="noopener">open LU Cloud</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/unrestricted-ai/">Unrestricted AI</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-coding-agent/">AI coding agent</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>
