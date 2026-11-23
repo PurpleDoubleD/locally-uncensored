@@ -44,6 +44,11 @@ ignore = [
     # uiautomation (Windows) pull it in, and uiautomation 0.25.1, the newest,
     # still depends on chrono. Moving our own code to jiff would therefore
     # not lift this line; it stays until uiautomation moves.
+    # cookie 0.18.1 comes in through tauri. The advisory is about private
+    # (encrypted) cookies after fork(). Tauri builds cookie with its default
+    # features on every target, without `private`, so that code is not in LU.
+    # The fix, 0.18.3, was hours old when the 3.1.3 gate found this.
+    { id = "RUSTSEC-2026-0594", reason = "cookie is built without the private feature on every target, so the affected code is not in LU" },
     { id = "RUSTSEC-2026-0543", reason = "chrono is only unmaintained, no known flaw. uiautomation 0.25.1 (newest) still needs it, so it stays even without our own calls" },
 ]
 
