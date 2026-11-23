@@ -52,10 +52,10 @@ describe('intent cloud gating', () => {
     expect(fromMeta).toEqual([...LOCAL_LANE_OPS, ...LOCAL_UTILITY_OPS].sort())
   })
 
-  it('the local IntentBar filter keeps the 5 classic tabs, Enhance, Scene, the 6 lanes (Swap since 3.1.3) and 3D selectable', () => {
+  it('the local IntentBar filter keeps the 5 classic tabs, Enhance, Scene, the 5 lanes and 3D selectable (Swap is a cloud action in 3.1.3)', () => {
     const selectable = INTENTS.filter((m) => !m.cloudOnly || m.hasLocalLane).map((m) => m.id)
     // Scene to Video (3.1.3) runs Wan 2.1 VACE in ComfyUI, after Animate as on the web.
-    expect(selectable).toEqual(['image', 'edit', 'removebg', 'upscale', 'video', 'animate', 'scene', 'character', 'lipsync', 'music', 'extend', 'motion', 'swap_character', '3d'])
+    expect(selectable).toEqual(['image', 'edit', 'removebg', 'upscale', 'video', 'animate', 'scene', 'character', 'lipsync', 'music', 'extend', 'motion', '3d'])
     // …and that IS what the pure filter reports for a ComfyUI local host.
     expect(unlocked('local', false)).toEqual(selectable)
   })

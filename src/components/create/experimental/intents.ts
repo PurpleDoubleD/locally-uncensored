@@ -202,14 +202,14 @@ export const INTENTS: IntentMeta[] = [
     // Swap Character (07.11.2026, port of the web's C52): a real video keeps
     // its motion, camera, sound and scene, and its people become the people
     // of the customer's photos. Cloud: Studio models (lib/render/swap.ts).
-    // Local since 3.1.3: Wan 2.2 Animate in ComfyUI, mode replace, one
-    // person (lib/create/swap-local.ts), with the pose extractor of Motion.
-    // A Mac has no local way (runsOnMlx), there it stays the cloud action.
+    // The local lane (lib/create/swap-local.ts) stays off in 3.1.3: its real
+    // runs on Wan 2.2 Animate came back with black mask bands and wrong
+    // colours, so Swap is a cloud action on every computer for now.
     id: 'swap_character', label: 'Swap Character', short: 'Swap', icon: Replace,
     placeholder: '',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
     capability: 'dwpose',
-    cloudOnly: true, hasLocalLane: true, requiresModels: 'motion',
+    cloudOnly: true, requiresModels: 'motion',
     examples: [],
   },
   {

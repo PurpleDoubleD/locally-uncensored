@@ -186,7 +186,7 @@ const ONE_FIGURE: SwapFigure[] = [{ image: null, role: '' }]
 // had no trainer runtime).
 // 3D joined in 3.1.0: TRELLIS.2 on the core nodes of the pinned ComfyUI.
 // Scene to Video joined in 3.1.3: Wan 2.1 VACE with a depth video of the scene.
-export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d', 'swap_character', 'scene'])
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character', '3d', 'scene'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local

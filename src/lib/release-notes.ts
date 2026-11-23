@@ -683,15 +683,15 @@ const NOTE_311: ReleaseNote = {
 // Memory #255, H3 Image), darunter der Rest aus CHANGELOG [3.1.3].
 const NOTE_313: ReleaseNote = {
   version: '3.1.3',
-  headline: 'Scene to Video in Create, Swap on your own computer, and Agent mode asks in the chat where it works.',
+  headline: 'Scene to Video in Create, and Agent mode asks in the chat where it works.',
   lines: [
     {
       title: 'Scene to Video in Create.',
       detail: 'Drop in a short video of a scene and a prompt, and LU turns it into a finished clip that keeps the camera and the layout. On LU Cloud, and on Windows and Linux also locally through ComfyUI with Wan 2.1 VACE.',
     },
     {
-      title: 'Swap Character on your own computer.',
-      detail: 'On Windows and Linux, Wan 2.2 Animate puts one character into a video and keeps the original sound. Each person in the video is a row with its place and its character, and LU never changes the model by itself.',
+      title: 'One rule for the people in a video.',
+      detail: 'In Swap on LU Cloud each person in the video is a row with its place and its character. What a model cannot do is said at that row, and LU never changes the model by itself.',
     },
     {
       title: 'Agent mode turns on right away.',
