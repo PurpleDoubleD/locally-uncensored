@@ -3485,7 +3485,8 @@ test.describe('a document that takes seconds to read shows a chip while it is re
     await expect(reading).toContainText('Reading scan.pdf')
     await expect(reading).toBeVisible()
     await expect(page.getByTestId('m-sheet-attach')).toHaveCount(0)
-    expect(held, 'the reader of PDFs was asked for').toBeGreaterThan(0)
+    // The chip stands before the request for the reader has gone out.
+    await expect.poll(() => held, { message: 'the reader of PDFs was asked for' }).toBeGreaterThan(0)
     release()
     await expect(reading).toHaveCount(0)
     await expect(page.getByTestId('m-toast-attach-unreadable')).toBeVisible()
