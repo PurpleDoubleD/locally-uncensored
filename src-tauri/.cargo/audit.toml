@@ -8,5 +8,6 @@ ignore = [
     "RUSTSEC-2026-0429", # same
     "RUSTSEC-2026-0545", # 17.11.2026 zip 4.x in updater, no aes-crypto, only ZipArchive; lift with zip >= 9.0.5 + libc/sysinfo raise in 3.1.2
     "RUSTSEC-2026-0548", # 17.11.2026 no ZipStreamReader (us: zip 9.0.0, updater: zip 4.x); lift with zip >= 9.0.5 + libc/sysinfo raise in 3.1.2
+    "RUSTSEC-2026-0594", # 23.11.2026 cookie comes through tauri, no target builds its `private` feature (see deny.toml)
     "RUSTSEC-2026-0543", # 17.11.2026 chrono only unmaintained; lift with the move to jiff or time in 3.1.2
 ]
