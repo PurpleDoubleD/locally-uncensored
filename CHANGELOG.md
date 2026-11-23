@@ -4,8 +4,8 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [3.1.3] - 2026-11-23
 
-Scene to Video comes to the desktop app, Swap Character runs on your own
-computer, and Agent mode asks in the chat where it works.
+Scene to Video comes to the desktop app, and Agent mode asks in the chat where
+it works.
 LU Cloud keeps its open models: seventeen video models and eight image models
 in the cloud catalogue.
 
@@ -19,10 +19,6 @@ in the cloud catalogue.
   Wan 2.1 VACE, driven by a depth video of the scene (Depth Anything V2 Small),
   for the first five seconds of the clip. On macOS Scene to Video runs on
   LU Cloud.
-- **Swap Character on your own computer (Windows and Linux).** Wan 2.2 Animate
-  in replace mode puts one character into a video and keeps the original
-  sound, for the first five seconds. Two or more people at once run on
-  LU Cloud. On macOS Swap runs on LU Cloud.
 - **One rule for the people in a video, for every model.** Each person is a row
   with a number, a place in the frame and a character. What a model cannot do
   is said at that row and at Create, together with a model that can. LU no

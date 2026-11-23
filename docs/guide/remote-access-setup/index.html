@@ -73,7 +73,7 @@
 
 <h2 id="what">What you get</h2>
 
-<p>The desktop app starts a small web server on your PC. Your phone opens it in its normal web browser: there is nothing to install on the phone. In version 3.0.6 there is no separate LU app for phones; the phone side is this web page, and any browser on a second computer works the same way.</p>
+<p>The desktop app starts a small web server on your PC. In your Wi-Fi, your phone can open it in its normal web browser, with nothing to install, and any browser on a second computer works the same way. Over the internet, only the LU app for Android gets through.</p>
 
 <p>On the phone page you can chat with the model that runs on your PC, pick another model, attach pictures, and switch on "Agent" so the model can use tools. What the agent may touch on your PC is decided by four switches on the desktop, and all four are off at the start. The messages from the phone also show up in the chat on the desktop.</p>
 
@@ -83,7 +83,7 @@
 
 <ul>
 <li>LU is installed and running on the PC, and a chat model is picked. Without a model the "Dispatch" button stays greyed out.</li>
-<li>For the Wi-Fi way, the phone and the PC are in the same network (the same router). For the internet way, the PC needs an internet connection; the phone can be anywhere.</li>
+<li>For the Wi-Fi way, the phone and the PC are in the same network (the same router). For the internet way, the PC needs an internet connection and the phone needs the LU app for Android (the <code>-Android.apk</code> file on the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">latest release</a>); the phone can then be anywhere.</li>
 <li>Pick a folder the agent may work in when you start. A project folder or an empty folder is right; your home folder or a system folder is refused.</li>
 <li>On a Mac: Remote Access is in the app, but it has not been confirmed on macOS yet.</li>
 </ul>
@@ -170,13 +170,21 @@
 
 <div class="step">
 <span class="step-num">3</span>
-<span class="step-title">Scan, then type the passcode</span>
+<span class="step-title">Scan the QR code with the LU app</span>
 <div class="step-body">
-<p>The address now ends in <code>trycloudflare.com/mobile</code>. Scan and type the passcode as above. The panel adds: "First connection may take 5 to 10 s while DNS propagates. If you see a DNS error, wait a moment and reload."</p>
+<p>Open the LU app on the phone and scan the QR code in the panel. The panel says: "Scan with the LU app. You confirm the phone here." and "Internet works only with the LU app. A browser on your phone needs the same Wi-Fi." The QR code renews itself while the panel is open. The first connection may take 5 to 10 seconds. If the app shows a DNS error, wait a moment and try again.</p>
 </div>
 </div>
 
-<p>The internet address is new for every session. It exists only while the session runs, and it changes the next time you dispatch.</p>
+<div class="step">
+<span class="step-num">4</span>
+<span class="step-title">Allow the phone on the desktop</span>
+<div class="step-body">
+<p>The desktop asks "Pair a phone" and names the phone. If it shows digits to compare, check that the phone shows the same ones, and press "Deny" if they differ. Press "Allow" within two minutes. The phone can then chat with your models and use web tools. Files, terminal and Create stay off until you turn them on under Settings, Voice &amp; Remote, Remote Access.</p>
+</div>
+</div>
+
+<p>The internet address is new for every session and exists only while the tunnel runs. A browser that opens it sees only the note "This address works only with the LU app". To let paired phones find this computer without a new scan, turn on "Reach this computer from anywhere" under Settings, Voice &amp; Remote, Remote Access. LU then starts Remote and the tunnel by itself when a phone is paired, and announces the tunnel address to lu-labs.ai.</p>
 
 <h2 id="passcode">The passcode and staying signed in</h2>
 
@@ -232,8 +240,8 @@
 <ul>
 <li><strong>What leaves the PC.</strong> The models run on your PC. The only thing that travels is the chat between the PC and the paired device.</li>
 <li><strong>Over your Wi-Fi</strong> the address starts with <code>http://</code>, not <code>https://</code>, so the connection inside your network is not encrypted. Use the Wi-Fi way only on a network you trust, such as your home network, not on a public hotspot.</li>
-<li><strong>Over the internet</strong> Cloudflare relays the traffic. It is encrypted between each device and Cloudflare, not end to end, so Cloudflare could read it.</li>
-<li><strong>The passcode is the key.</strong> Anyone who can reach the address and knows the current passcode can pair. Do not post a photo of the panel. If someone may have seen it, press the circular arrow for a new passcode, and remove unknown devices under "Connected Devices".</li>
+<li><strong>Over the internet</strong> Cloudflare relays the traffic, and the LU app and the desktop encrypt what they send to each other before it gets there. Only phones you allowed on the desktop get in.</li>
+<li><strong>The passcode is the key in your Wi-Fi.</strong> Anyone who can reach the Wi-Fi address and knows the current passcode can pair. Do not post a photo of the panel. If someone may have seen it, press the circular arrow for a new passcode, and remove unknown devices under "Connected Devices".</li>
 <li><strong>Switches.</strong> A paired phone can do exactly what the four switches allow, nothing less. Leave "Shell &amp; Code Execution" off unless you need it for a task right now.</li>
 <li><strong>The folder.</strong> The agent's file tools stay inside the folder you picked at Dispatch. Pick a project folder, not a folder full of private papers. The chapter <a href="/guide/agent/">Agent mode</a> explains how the workspace folder works.</li>
 </ul>
@@ -244,13 +252,13 @@
 
 <p><strong>The phone shows "Invalid access code".</strong> A typo, or the code changed in the meantime (it changes after 15 minutes, after the circular arrow and after "Restart"). Type the code that the desktop shows right now.</p>
 
-<p><strong>"Too many attempts. Try again in (N)s".</strong> Three wrong codes. Wait the seconds it names, then type the current code. Over the internet all devices count as one here, so a second phone trying at the same time adds to the same count.</p>
+<p><strong>"Too many attempts. Try again in (N)s".</strong> Three wrong codes. Wait the seconds it names, then type the current code.</p>
 
 <p><strong>"Enter 6-digit code".</strong> Fewer than six digits were typed.</p>
 
-<p><strong>"Connection failed" on the phone, or the page does not load at all (Wi-Fi way).</strong> Check that the phone is in the same Wi-Fi as the PC and not on mobile data or a guest network. On Windows the firewall is the usual cause: LU adds an allow rule named "LU Remote 11435" for private networks by itself only when it runs with administrator rights. Otherwise allow LU once in the Windows firewall settings, and make sure Windows treats your Wi-Fi as a private network, because the rule does not cover public ones. If none of that helps, use the internet way.</p>
+<p><strong>"Connection failed" on the phone, or the page does not load at all (Wi-Fi way).</strong> Check that the phone is in the same Wi-Fi as the PC and not on mobile data or a guest network. On Windows the firewall is the usual cause: LU adds an allow rule named "LU Remote 11435" for private networks by itself only when it runs with administrator rights. Otherwise allow LU once in the Windows firewall settings, and make sure Windows treats your Wi-Fi as a private network, because the rule does not cover public ones. If none of that helps, use the internet way with the LU app.</p>
 
-<p><strong>A DNS error on the phone right after scanning (internet way).</strong> The new address needs a few seconds to be known everywhere. Wait 5 to 10 seconds and reload the page.</p>
+<p><strong>A DNS error on the phone right after scanning (internet way).</strong> The new address needs a few seconds to be known everywhere. Wait 5 to 10 seconds and try again in the LU app.</p>
 
 <p><strong>"Cloudflare tunnel started but no public URL appeared within 15 s (cloudflared PID (number))."</strong> The message goes on to say that cloudflared usually cannot reach Cloudflare, and to check the firewall or VPN. "LAN dispatch still works in the meantime." After you fix the firewall or VPN, press "Stop" and dispatch again with "Internet"; "Restart" alone starts the server without a tunnel.</p>
 
