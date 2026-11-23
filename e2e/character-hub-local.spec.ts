@@ -1,6 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { writeFileSync } from 'fs'
-import { ANIMATE, LORA, PNG, bootLocal, type Graph } from './support/character-local'
+import { LORA, PNG, bootLocal, type Graph } from './support/character-local'
 import { openCharacterHub } from './support/character-hub'
 
 /**
@@ -84,12 +83,6 @@ async function savePhotoCharacter(page: Page, name: string, copies: number) {
   await expect(page.locator('[data-hub-character^="saved:"]', { hasText: name })).toHaveAttribute('aria-selected', 'true')
 }
 
-async function tapFrame(page: Page, x: number, y: number) {
-  const frame = page.getByRole('group', { name: /First frame of your video/ })
-  const box = (await frame.boundingBox())!
-  await frame.click({ position: { x: box.width * x, y: box.height * y } })
-}
-
 /** Is the element really on top at its middle (not covered, not cut off)? */
 async function clickable(page: Page, selector: string) {
   return page.locator(selector).first().evaluate((el) => {
@@ -100,7 +93,7 @@ async function clickable(page: Page, selector: string) {
   })
 }
 
-test('local mode, Windows: the old local character is there, and Image, Swap, Motion and Talk all start on this computer', async ({ page }) => {
+test('local mode, Windows: the old local character is there, Image, Motion and Talk start on this computer, Swap is LU Cloud', async ({ page }) => {
   test.setTimeout(120_000)
   await bootLocal(page)
   await openCharacterHub(page)
@@ -109,8 +102,10 @@ test('local mode, Windows: the old local character is there, and Image, Swap, Mo
   await expect(opa).toBeVisible({ timeout: 15_000 })
   await savePhotoCharacter(page, 'Sam', 6)
 
-  // Every action is local here: no "runs on LU Cloud", the line says Local.
-  for (const a of ['image', 'swap', 'motion', 'talk']) {
+  // Swap is a cloud action in 3.1.3: its local runs did not give a good picture.
+  await expect(page.locator('[data-hub-action="swap"]')).toHaveAttribute('aria-label', /runs on LU Cloud/)
+  // Every other action is local here: no "runs on LU Cloud".
+  for (const a of ['image', 'motion', 'talk']) {
     const btn = page.locator(`[data-hub-action="${a}"]`)
     await expect(btn).toBeVisible()
     await expect(btn).not.toHaveAttribute('aria-label', /runs on LU Cloud/)
@@ -128,56 +123,18 @@ test('local mode, Windows: the old local character is there, and Image, Swap, Mo
   }
   await shoot(page, 'a-image')
 
-  // ── Swap: one person, Sam, Wan 2.2 Animate replace ──
   await page.locator('[data-hub-character^="saved:"]', { hasText: 'Sam' }).click()
-  await page.locator('[data-hub-action="swap"]').click()
-  await expect(page.locator('[data-swap-controls][data-swap-local]')).toBeVisible()
-  await expect(page.locator('[data-hub-action-meta]')).toContainText('Local')
-  await expect(page.locator('[data-swap-tips]')).toContainText('Runs on your computer with Wan 2.2 Animate')
-  // The window waits and says why.
-  await expect(createButton(page)).toBeDisabled()
-  await page.locator('[data-swap-controls] input[type=file][accept^="video"]').setInputFiles(await clip(page, 'walk.webm'))
-  await expect(page.getByRole('group', { name: /First frame of your video/ })).toBeVisible({ timeout: 20_000 })
-  await tapFrame(page, 0.4, 0.4)
-  await expect(page.getByRole('button', { name: 'Character for person 1' })).toContainText('Sam', { timeout: 15_000 })
-  await expect(page.locator('[data-swap-figure="1"] [data-swap-place]')).toHaveText('main person')
-  // A second person: the row says what the local way cannot, Create waits,
-  // and the line names where it runs. Nothing switches by itself.
-  await tapFrame(page, 0.8, 0.4)
-  await expect(page.locator('[data-swap-row-limit="2"]')).toHaveText('Local (Wan 2.2 Animate) replaces one person.')
-  await expect(page.locator('[data-swap-elsewhere]')).toContainText('LU Cloud')
-  await expect(createButton(page)).toBeDisabled()
-  await shoot(page, 'b-swap-zwei')
-  await page.getByRole('button', { name: 'Remove mark 2' }).click()
-  await expect(page.locator('[data-swap-row-limit]')).toHaveCount(0)
-  await page.locator('[data-swap-consent] input').check()
-  await expect(createButton(page)).toBeEnabled()
-  expect(await clickable(page, '[data-prompt-window] button:has-text("Create")')).toBe(true)
-  await shoot(page, 'b-swap')
-  await createButton(page).click()
-  await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(2)
-  {
-    const g = (await posted(page))[1]
-    const [, cond] = nodeOf(g, 'WanAnimateToVideo')
-    const [maskId] = nodeOf(g, 'GrowMask')
-    const [bgId] = nodeOf(g, 'ImageCompositeMasked')
-    expect(cond.inputs.character_mask).toEqual([maskId, 0])
-    expect(cond.inputs.background_video).toEqual([bgId, 0])
-    expect(types(g)).toContain('VHS_LoadVideo')
-    expect(types(g)).toContain('DWPreprocessor')
-    expect(nodeOf(g, 'UnetLoaderGGUF')[1].inputs.unet_name).toBe(ANIMATE)
-    if (SHOTS) writeFileSync(`${SHOTS}/lokal-swap-graph.json`, JSON.stringify(g, null, 2))
-  }
 
   // ── Motion: Sam copies the moves of the clip ──
   await page.locator('[data-hub-action="motion"]').click()
   await expect(page.locator('[data-motion-controls]')).toBeVisible()
   await expect(page.locator('[data-portrait-line]')).toContainText('Sam', { timeout: 15_000 })
+  await page.locator('input[type=file][accept^="video"]').first().setInputFiles(await clip(page, 'walk.webm'))
   await expect(page.locator('[data-hub-clip]')).toBeVisible()
   await createButton(page).click()
-  await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(3)
+  await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(2)
   {
-    const g = (await posted(page))[2]
+    const g = (await posted(page))[1]
     const [, cond] = nodeOf(g, 'WanAnimateToVideo')
     expect(cond.inputs.pose_video).toBeTruthy()
     expect(cond.inputs.background_video).toBeUndefined()
@@ -189,7 +146,7 @@ test('local mode, Windows: the old local character is there, and Image, Swap, Mo
   await expect(page.locator('[data-talk-controls]')).toBeVisible()
   await page.locator('[data-talk-controls] input[type=file][accept^="audio"]').first().setInputFiles({ name: 'line.wav', mimeType: 'audio/wav', buffer: wav() })
   await createButton(page).click()
-  await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(4)
-  expect(types((await posted(page))[3])).toContain('WanSoundImageToVideo')
+  await expect.poll(async () => (await posted(page)).length, { timeout: 20_000 }).toBe(3)
+  expect(types((await posted(page))[2])).toContain('WanSoundImageToVideo')
   await shoot(page, 'd-talk')
 })

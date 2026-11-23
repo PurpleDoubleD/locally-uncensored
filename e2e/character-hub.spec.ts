@@ -262,8 +262,8 @@ test('one pill: the characters as tabs, the stage, and the row over the window s
   // Swap, Bean on person 1, with the catalogue's price.
   await page.getByRole('radio', { name: 'Swap Character', exact: true }).click()
   await expect(hub).toHaveAttribute('data-character-hub', 'panel')
-  // Swap runs on this computer too since 3.1.3 (Windows/Linux, Wan 2.2 Animate).
-  await expect(page.locator('[data-hub-action-meta]')).toHaveText('Local · 8k / s')
+  // Swap is a cloud action in 3.1.3, so the line names only its price.
+  await expect(page.locator('[data-hub-action-meta]')).toHaveText('8k / s')
   await expect(page.locator('[data-swap-controls]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Character for person 1' })).toContainText('Bean')
   // The video comes in through the upload of the prompt window.
