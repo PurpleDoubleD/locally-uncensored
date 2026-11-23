@@ -281,7 +281,7 @@
   // uses LU Cloud in the browser until then. A computer sees nothing; closed
   // stays closed in this browser.
   var PHONE_KEY = "lu_phone_app_banner_closed";
-  var APK_URL = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.2/LU-3.1.2-Android.apk";
+  var APK_URL = "https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.3/LU-3.1.3-Android.apk";
   function phoneKind() {
     var ua = navigator.userAgent || "";
     if (/android/i.test(ua)) return "android";

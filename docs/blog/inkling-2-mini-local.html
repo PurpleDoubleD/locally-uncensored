@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inkling 2 Mini Locally: Which Size for Your GPU</title>
+<meta name="description" content="Inkling 2 Mini on your own GPU or Mac: 23 GGUF sizes by memory, what the maker&#x27;s benchmarks say against Qwen 3.8 27B, where it loses, and its usage policy.">
+<meta name="keywords" content="inkling 2 mini, inkling 2 mini local, inkling 2 mini gguf, inkling 2 mini vram, inkling 2 mini vs qwen 3.8, thinking machines inkling, run inkling 2 mini">
+<meta property="og:title" content="Inkling 2 Mini Locally: Which Size Fits Your Card, and How It Compares to Qwen 3.8 27B">
+<meta property="og:description" content="Inkling 2 Mini on your own GPU or Mac: 23 GGUF sizes by memory, what the maker&#x27;s benchmarks say against Qwen 3.8 27B, where it loses, and its usage policy.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/inkling-2-mini-local.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-11-23">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Models">
+<meta property="article:tag" content="Local AI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Inkling 2 Mini Locally: Which Size for Your GPU">
+<meta name="twitter:description" content="Inkling 2 Mini on your own GPU or Mac: 23 GGUF sizes by memory, what the maker&#x27;s benchmarks say against Qwen 3.8 27B, where it loses, and its usage policy.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/inkling-2-mini-local.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Inkling 2 Mini Locally: Which Size Fits Your Card, and How It Compares to Qwen 3.8 27B","description":"Inkling 2 Mini on your own GPU or Mac: 23 GGUF sizes by memory, what the maker's benchmarks say against Qwen 3.8 27B, where it loses, and its usage policy.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-11-23","dateModified":"2026-11-23","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/inkling-2-mini-local.html"},"keywords":"inkling 2 mini, inkling 2 mini local, inkling 2 mini gguf, inkling 2 mini vram, inkling 2 mini vs qwen 3.8, thinking machines inkling, run inkling 2 mini"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"How much VRAM does Inkling 2 Mini need?","acceptedAnswer":{"@type":"Answer","text":"The smallest size in Locally Uncensored, IQ2_XXS, is a 9.6 GB file and wants about 13 GB of graphics or unified memory. The recommended Q4_K_M is 17.4 GB and wants about 20 GB. Thinking Machines recommends 32 GB or more for its own 20 GB checkpoint."}},{"@type":"Question","name":"Is Inkling 2 Mini better than Qwen 3.8 27B?","acceptedAnswer":{"@type":"Answer","text":"On the maker's table it leads on most coding, search and tool-use tests and trails on Terminal Bench v2.1, office-work tests and factual recall. The Artificial Analysis Intelligence Index has both at 20.1. Most of these numbers were published by Thinking Machines."}},{"@type":"Question","name":"Can Inkling 2 Mini read images?","acceptedAnswer":{"@type":"Answer","text":"Yes. It takes text and images and answers in text. In Locally Uncensored the image part downloads with the model. With a small context window, such as 16K on a 16 GB card, the model can load without image input, and the app says so."}},{"@type":"Question","name":"Does Inkling 2 Mini run on a Mac?","acceptedAnswer":{"@type":"Answer","text":"Yes, on Apple Silicon, through the LU Engine or through Ollama 0.40.17 or newer. Thinking Machines names 32 GB or more of memory for Macs."}},{"@type":"Question","name":"Does Inkling 2 Mini run on a phone?","acceptedAnswer":{"@type":"Answer","text":"Not on the phone itself in Locally Uncensored. The phone app uses it through Remote from your computer."}},{"@type":"Question","name":"Can I use Inkling 2 Mini commercially?","acceptedAnswer":{"@type":"Answer","text":"The weights are under Apache 2.0, and the model card also links the maker's Model Acceptable Use Policy. Read that policy before you build on the model, because it also covers what people do with it through your product."}},{"@type":"Question","name":"Is there an uncensored version of Inkling 2 Mini?","acceptedAnswer":{"@type":"Answer","text":"Locally Uncensored does not offer one. Our catalog carries only the original model, and we have not tested any modified version, so we do not recommend one. The maker's usage policy prohibits removing the model's safety measures, which is also why Neurons is off for this model."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://locallyuncensored.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://locallyuncensored.com/blog/"},{"@type":"ListItem","position":3,"name":"Inkling 2 Mini Locally","item":"https://locallyuncensored.com/blog/inkling-2-mini-local.html"}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://purple47.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/pricing/">Pricing</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">4200+&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">1700+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="he-cta" href="/pricing/" aria-label="LU Cloud plans and what they include"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Cloud</a>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Model Guide</span>
+    <span>November 23, 2026</span>
+    <span>&middot;</span>
+    <span>5 min read</span>
+  </div>
+
+  <article>
+    <h1>Inkling 2 Mini Locally: Which Size Fits Your Card, and How It Compares to Qwen 3.8 27B</h1>
+
+    <p>Inkling 2 Mini is an open-weight model from Thinking Machines, released on 20 November 2026. It has 26.4B parameters, reads text and images, calls tools and can think before it answers. Locally Uncensored 3.1.3 offers it in 23 GGUF sizes, from a 9.6 GB file to the 48.6 GB full-precision one.</p>
+
+    <p>The short answer: with 16 GB of graphics memory take Q3_K_S, with 20 GB take Q4_K_M. Under 13 GB, pick a smaller model.</p>
+
+    <h2>What Is Different About It</h2>
+
+    <p>The model has 24 layers, and the middle 12 run three times with shared weights. That gives 48 layer passes per token from 24 layers of weights. Each token also uses only 8 of 128 experts in a layer, so just 3.4B parameters are active, or 5.4B once the extra passes are counted. That is why a 26B model can keep up with denser models of the same size.</p>
+
+    <pre><code>Parameters     26.4B total, 3.4B active
+Input          text and images
+Output         text
+Context        up to 1M tokens
+License        Apache 2.0, plus the maker's usage policy</code></pre>
+
+    <h2>Which Size for Which Card</h2>
+
+    <p>These are the memory figures Locally Uncensored shows for each file. A larger context window needs more on top.</p>
+
+    <table>
+      <thead><tr><th>Graphics or unified memory</th><th>Size to pick</th><th>File</th></tr></thead>
+      <tbody>
+        <tr><td>12 GB</td><td>Below the smallest size. IQ2_XXS wants about 13 GB</td><td>9.6 GB</td></tr>
+        <tr><td>16 GB</td><td>Q3_K_S, the size we tested</td><td>12.5 GB</td></tr>
+        <tr><td>20 GB</td><td>Q4_K_M, the recommended size</td><td>17.4 GB</td></tr>
+        <tr><td>24 GB</td><td>Q5_K_M</td><td>19.8 GB</td></tr>
+        <tr><td>32 GB</td><td>Q8_0</td><td>25.9 GB</td></tr>
+        <tr><td>64 GB</td><td>BF16, the full-precision file; it wants about 52 GB</td><td>48.6 GB</td></tr>
+      </tbody>
+    </table>
+
+    <p>Thinking Machines recommends 32 GB or more for its own 20 GB checkpoint. The quantized GGUF files are how it fits on smaller cards, and the lower sizes give up some quality. We have not measured how much.</p>
+
+    <div class="callout info"><div class="callout-title">What we ran</div>
+    <p>A small test, not a benchmark: Q3_K_S on Windows with an RTX 5080 gave 28.4 to 29.1 tokens per second in the app's benchmark. Chat, thinking, an image and an agent run with file tools all worked. With a 16K context the model loaded without image input, and the app said so.</p>
+    </div>
+
+    <h2>Against Qwen 3.8 27B</h2>
+
+    <p>The numbers below come from the <a href="https://huggingface.co/thinkingmachines/Inkling-2-Mini" target="_blank" rel="noopener">table on the Inkling 2 Mini model card</a>, so the maker chose what to show. We did not rerun them. On the Artificial Analysis Intelligence Index in that table, the two tie at 20.1.</p>
+
+    <h3>Where Inkling 2 Mini leads</h3>
+    <table>
+      <thead><tr><th>Test</th><th>Inkling 2 Mini</th><th>Qwen 3.8 27B</th></tr></thead>
+      <tbody>
+        <tr><td>SWE-bench Verified</td><td>79.2%</td><td>77.8%</td></tr>
+        <tr><td>SWE-bench Pro v2 (Hard)</td><td>77.9%</td><td>73.8%</td></tr>
+        <tr><td>DeepSWE v1.1</td><td>48.2%</td><td>42.2%</td></tr>
+        <tr><td>Vibe Code Bench v1.1</td><td>77.9%</td><td>64.9%</td></tr>
+        <tr><td>BrowseComp</td><td>79.0%</td><td>61.6%</td></tr>
+        <tr><td>MCP Atlas</td><td>82.7%</td><td>77.3%</td></tr>
+        <tr><td>LongBench v2</td><td>66.9%</td><td>52.3%</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Where it loses</h3>
+    <table>
+      <thead><tr><th>Test</th><th>Inkling 2 Mini</th><th>Qwen 3.8 27B</th></tr></thead>
+      <tbody>
+        <tr><td>Terminal Bench v2.1</td><td>71.6%</td><td>73.0%</td></tr>
+        <tr><td>AutomationBench-AA v1.0.6</td><td>41.8%</td><td>48.2%</td></tr>
+        <tr><td>EnterpriseOps-Gym</td><td>42.0%</td><td>44.2%</td></tr>
+        <tr><td>GDPVal-AA v2.1</td><td>1319</td><td>1427</td></tr>
+        <tr><td>AA-Briefcase v1.1</td><td>1263</td><td>1391</td></tr>
+        <tr><td>MMMU Pro (vision)</td><td>74.9%</td><td>76.3%</td></tr>
+        <tr><td>AA-Omniscience, answers without a made-up fact</td><td>63.4%</td><td>71.4%</td></tr>
+      </tbody>
+    </table>
+
+    <p>So for coding agents, web research and long documents, Inkling 2 Mini looks like the better pick. For office-style tasks and for facts it has to recall without a source, Qwen 3.8 27B holds up better.</p>
+
+    <h2>Running It in Locally Uncensored</h2>
+
+    <ol>
+      <li>Open Models, then Discover, and search for Inkling.</li>
+      <li>Pick a size. The app shows what it wants in memory and links the maker's policy.</li>
+      <li>Download it, then choose it in Chat, Agent or Code.</li>
+    </ol>
+
+    <p>On a Mac with Apple Silicon you can also use the Ollama build, a 19 GB download that needs Ollama 0.40.17 or newer. On a phone, Inkling 2 Mini runs through <a href="/remote-access/">Remote</a> from your computer.</p>
+
+    <h2>Limits</h2>
+
+    <ul>
+      <li>It is new, and our run above is a small test.</li>
+      <li>The IQ4_NL size is left out because of an open llama.cpp bug.</li>
+      <li>Neurons is not available for this model because of its maker's usage policy.</li>
+      <li>It is not a "Start here" recommendation in the app yet.</li>
+    </ul>
+
+    <h2>The License and the Usage Policy</h2>
+
+    <p>The weights are under Apache 2.0. The model card also links the <a href="https://thinkingmachines.ai/model-acceptable-use-policy/" target="_blank" rel="noopener">Thinking Machines Model Acceptable Use Policy</a>. It sets out what the model may not be used for, and if other people use the model through your product, it makes you responsible for their use too. Read it before you build on the model.</p>
+
+    <h2>Questions</h2>
+
+    <h3>How much VRAM does Inkling 2 Mini need?</h3>
+    <p>The smallest size in Locally Uncensored, IQ2_XXS, is a 9.6 GB file and wants about 13 GB of graphics or unified memory. The recommended Q4_K_M is 17.4 GB and wants about 20 GB. Thinking Machines recommends 32 GB or more for its own 20 GB checkpoint.</p>
+
+    <h3>Is Inkling 2 Mini better than Qwen 3.8 27B?</h3>
+    <p>On the maker's table it leads on most coding, search and tool-use tests and trails on Terminal Bench v2.1, office-work tests and factual recall. The Artificial Analysis Intelligence Index has both at 20.1. Most of these numbers were published by Thinking Machines.</p>
+
+    <h3>Can Inkling 2 Mini read images?</h3>
+    <p>Yes. It takes text and images and answers in text. In Locally Uncensored the image part downloads with the model. With a small context window, such as 16K on a 16 GB card, the model can load without image input, and the app says so.</p>
+
+    <h3>Does Inkling 2 Mini run on a Mac?</h3>
+    <p>Yes, on Apple Silicon, through the LU Engine or through Ollama 0.40.17 or newer. Thinking Machines names 32 GB or more of memory for Macs.</p>
+
+    <h3>Does Inkling 2 Mini run on a phone?</h3>
+    <p>Not on the phone itself in Locally Uncensored. The phone app uses it through Remote from your computer.</p>
+
+    <h3>Can I use Inkling 2 Mini commercially?</h3>
+    <p>The weights are under Apache 2.0, and the model card also links the maker's Model Acceptable Use Policy. Read that policy before you build on the model, because it also covers what people do with it through your product.</p>
+
+    <h3>Is there an uncensored version of Inkling 2 Mini?</h3>
+    <p>Locally Uncensored does not offer one. Our catalog carries only the original model, and we have not tested any modified version, so we do not recommend one. The maker's <a href="https://thinkingmachines.ai/model-acceptable-use-policy/" target="_blank" rel="noopener">usage policy</a> prohibits removing the model's safety measures, which is also why Neurons is off for this model.</p>
+
+    <h2>Related</h2>
+
+    <ul>
+      <li><a href="https://huggingface.co/thinkingmachines/Inkling-2-Mini" target="_blank" rel="noopener">Inkling 2 Mini on Hugging Face</a></li>
+      <li><a href="/guide/">The Locally Uncensored handbook</a></li>
+      <li><a href="/mac/">Locally Uncensored on a Mac</a></li>
+      <li><a href="/remote-access/">Use your computer's models from your phone</a></li>
+    </ul>
+  </article>
+
+  <div class="post-footer">
+    <p>Locally Uncensored is free, open source and runs on your own machine</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:0">
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.3_x64-setup.exe" class="cta-btn" download>Download for Windows</a>
+      <a data-mac-latest href="https://github.com/PurpleDoubleD/locally-uncensored/releases/download/v3.1.3/LU_3.1.3_aarch64.dmg" class="cta-btn" download>Download for Mac (Apple Silicon)</a>
+      <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest/download/Locally.Uncensored_3.1.3_amd64.AppImage" class="cta-btn" download>Download for Linux</a>
+    </p>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/pricing/">Pricing</a>
+    <a href="https://locallyuncensored.com/cloud/">LU Cloud</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-chat-online/">Uncensored AI chat online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-image-generator-online/">Image generator online</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-video-generator-online/">Video generator online</a>
+    <a href="https://locallyuncensored.com/unrestricted-ai/">Unrestricted AI</a>
+    <a href="https://locallyuncensored.com/uncensored-ai-coding-agent/">AI coding agent</a>
+    <a href="https://locallyuncensored.com/alternatives/">Alternatives</a>
+    <a href="https://locallyuncensored.com/is-locally-uncensored-safe/">Is it safe?</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+    <a href="https://locallyuncensored.com/privacy/">Privacy</a>
+    <a href="https://locallyuncensored.com/terms/">Terms</a>
+    <a href="https://locallyuncensored.com/impressum/">Impressum</a>
+  </div>
+</footer>
+</body>
+</html>

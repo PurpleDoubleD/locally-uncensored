@@ -18,7 +18,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 
 ## Key Facts
 - Name: Locally Uncensored
-- Current Version: v3.1.2
+- Current Version: v3.1.3
 - Type: Desktop AI Application (local AI studio)
 - License: AGPL-3.0 (free and open source)
 - Platforms: Windows 10/11, Linux (deb, rpm, AppImage), macOS 14 or newer on Apple Silicon (dmg, since v3.0.6). Intel Macs are not supported.
@@ -140,6 +140,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
   - Handbook chapter, Settings and troubleshooting: https://locallyuncensored.com/guide/settings-and-troubleshooting/
   - Handbook chapter, FAQ and glossary: https://locallyuncensored.com/guide/faq-and-glossary/
 - Blog (guides, comparisons, release notes): https://locallyuncensored.com/blog/
+- Inkling 2 Mini Locally: Which Size Fits Your Card, and How It Compares to Qwen 3.8 27B: https://locallyuncensored.com/blog/inkling-2-mini-local.html
 - How to Steer a Local LLM With Neuron Sliders: https://locallyuncensored.com/blog/steer-local-llm-neurons.html
 - Qwen-Image 2.1 uncensored (local setup, community builds, GGUF sizes, LoRAs, research licence): https://locallyuncensored.com/qwen-image-2-1/
 - Qwen 3.8 uncensored (abliterated and heretic builds of Qwen 3.8 27B, GGUF sizes by VRAM): https://locallyuncensored.com/qwen-3-8-uncensored/
