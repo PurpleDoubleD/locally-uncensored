@@ -52,7 +52,7 @@ describe('no list of local mode holds Erase', () => {
     for (const file of ['src/api/mcp/builtin-tools.ts', 'mobile-client/agent-core.js']) {
       const text = readFileSync(resolve(__dirname, '../../../../..', file), 'utf8')
       expect(text, file).not.toContain('upscale, erase')
-      expect(text, file).toContain('a mask in Edit to remove an object')
+      expect(text, file).toContain('a mask in Edit to repaint an area')
     }
   })
 })

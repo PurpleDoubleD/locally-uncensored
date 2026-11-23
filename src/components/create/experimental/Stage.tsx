@@ -16,7 +16,8 @@ import { stageSetupAnswer, laneModelCount } from './stageGate'
 import { capabilityAnswer, laneFace, settleFace, stageAnswers, threeDFace, STAGE_WAIT_MAX_MS, type LaneFace } from '../../../lib/create/stage-answers'
 import { needsMaskFor } from './maskGate'
 import { useLocalEditMask } from './useLocalEditMask'
-import { MASK_READY_LINE } from '../../../lib/local-edit-mask'
+import { maskReadyLine } from '../../../lib/local-edit-mask'
+import { useSettingsStore } from '../../../stores/settingsStore'
 import { GeneratingView, ResultView } from './OutputView'
 import { EmptyState } from '../ui/EmptyState'
 import { MONOGRAM, MONOGRAM_INVERT } from '../../layout/brand'
@@ -605,6 +606,7 @@ function useMaskTint(mask: { url: string; width: number; height: number } | null
 
 // ── Source loaded, awaiting generation ──
 function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
+  const cloudFeatures = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
   const source = useCreateStore((s) => s.source)
   const mask = useCreateStore((s) => s.mask)
   const setSource = useCreateStore((s) => s.setSource)
@@ -699,7 +701,7 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
             : noMask ? 'Write the edit prompt below, then Create. This model needs no mask.'
             // A cloud model that edits through a mask does not start without
             // one (maskGate.ts), so the line about an empty mask is local only.
-            : localMask.block ?? (localMask.masked ? MASK_READY_LINE : null) ?? (needsMaskFor(intent, backend, false) ? 'Paint the area to change, write your prompt below, then Create.'
+            : localMask.block ?? (localMask.masked ? maskReadyLine(cloudFeatures) : null) ?? (needsMaskFor(intent, backend, false) ? 'Paint the area to change, write your prompt below, then Create.'
             // The Mac's Edit does not restyle at a denoise as the Windows
             // graph does: without a mask the prompt edits the whole image.
             : meta.id === 'edit' && backend === 'local' && isMlxImageHost()

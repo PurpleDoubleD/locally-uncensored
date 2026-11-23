@@ -495,7 +495,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       'Make one picture on this computer (Apple MLX on a Mac, ComfyUI elsewhere). '
       + 'USE for "draw", "make an image of", and to change a picture: pass it as `inputImage`. '
       + '`inputImage` takes "attachment N" for a picture the user attached, or the file name of a picture an earlier call made in this chat. Never invent a file name; an unknown one is refused with the list of pictures this chat has. '
-      + 'It cannot remove a background, upscale, extend a clip or make sound: those are in the Create tab, and so is a mask in Edit to remove an object. '
+      + 'It cannot remove a background, upscale, extend a clip or make sound: those are in the Create tab, and so is a mask in Edit to repaint an area. '
       + 'Takes up to the image timeout in Settings (20 minutes unless changed); the chat model may pause while the image model loads. One call per turn. '
       + 'Optional `settings` (size, aspectRatio, steps, LoRA): a value beyond the model\'s limit is refused with the limit.',
     inputSchema: {

@@ -15,9 +15,16 @@ const COMFY_MASK_TYPES: ReadonlySet<string> = new Set(['sd15', 'sdxl', 'unknown'
 export const MASK_NEEDS_CHECKPOINT =
   'This model cannot use a mask. Pick an SDXL or SD 1.5 checkpoint, or clear the mask to edit the whole image.'
 
-export const MASK_PROMPT_PLACEHOLDER = 'Describe what goes there, or leave this empty to remove what you painted…'
+export const MASK_PROMPT_PLACEHOLDER = 'Describe what goes there, or leave this empty to repaint the area from its surroundings…'
 
-export const MASK_READY_LINE = 'Hit Create to remove the painted area, or describe below what should be there instead.'
+export const MASK_READY_LINE = 'Hit Create to repaint the area, or describe below what should be there. Without a prompt the result can vary.'
+
+/** Real runs on SDXL, 23.11.2026: an empty prompt cleared the area in 2 of 6
+ *  runs and painted something new in the others, so the line promises no
+ *  removal. It names the cloud tool only where the app may show cloud tools. */
+export function maskReadyLine(cloudFeatures: boolean): string {
+  return cloudFeatures ? `${MASK_READY_LINE} For reliable removal, use Erase on LU Cloud.` : MASK_READY_LINE
+}
 
 /** Checkpoint models read tags and scenes, not instructions. */
 export const REMOVE_PROMPT_COMFY = 'empty background, seamless continuation of the surrounding area, matching light and texture'

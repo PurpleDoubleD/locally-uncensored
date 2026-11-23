@@ -694,6 +694,10 @@ const NOTE_313: ReleaseNote = {
       detail: 'In Swap on LU Cloud each person in the video is a row with its place and its character. What a model cannot do is said at that row, and LU never changes the model by itself.',
     },
     {
+      title: 'Erase is now only on LU Cloud.',
+      detail: 'In Local mode, a mask in Edit with an empty prompt repaints the area from its surroundings. The result can vary, so use Erase on LU Cloud when an object has to go reliably.',
+    },
+    {
       title: 'Agent mode turns on right away.',
       detail: 'On the first message it asks in the chat: sandbox or folder. Your message stays and carries on after the choice.',
     },
