@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url><loc>https://locallyuncensored.com/</loc><lastmod>2026-11-15</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
   <url><loc>https://locallyuncensored.com/guide/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/</loc><lastmod>2026-11-23</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/</loc><lastmod>2026-11-24</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/remote-access/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/alternatives/</loc><lastmod>2026-10-16</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://locallyuncensored.com/mac/</loc><lastmod>2026-11-05</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -50,7 +50,7 @@
   <url><loc>https://locallyuncensored.com/blog/how-to-run-qwen-image-2-1-locally.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://locallyuncensored.com/blog/qwen-image-2-1-explained.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-2-hotfix.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/new-uncensored-chat-models-lu-cloud.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/new-uncensored-chat-models-lu-cloud.html</loc><lastmod>2026-11-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/remove-refusals-measured.html</loc><lastmod>2026-11-05</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-9-release.html</loc><lastmod>2026-11-05</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-7-release.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -68,8 +68,8 @@
   <url><loc>https://locallyuncensored.com/blog/reverse-engineer-an-app-with-a-local-model.html</loc><lastmod>2026-10-22</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/how-to-use-kimi-k3-1-pro-in-lu.html</loc><lastmod>2026-10-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/kimi-k3-1-pro.html</loc><lastmod>2026-10-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/deepseek-v4-1-flash-uncensored.html</loc><lastmod>2026-10-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/how-to-use-deepseek-v4-1-flash-uncensored.html</loc><lastmod>2026-10-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/deepseek-v4-1-flash-uncensored.html</loc><lastmod>2026-11-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/how-to-use-deepseek-v4-1-flash-uncensored.html</loc><lastmod>2026-11-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-6-release.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/talk-to-local-llm-voice-chat.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://locallyuncensored.com/blog/locally-uncensored-v3-0-1-release.html</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -165,5 +165,7 @@
   <url><loc>https://locallyuncensored.com/android/</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>
   <url><loc>https://locallyuncensored.com/ios/</loc><lastmod>2026-10-19</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>
   <url><loc>https://locallyuncensored.com/blog/steer-local-llm-neurons.html</loc><lastmod>2026-11-23</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://locallyuncensored.com/blog/inkling-2-mini-local.html</loc><lastmod>2026-11-23</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/glm-5-3-flash-uncensored.html</loc><lastmod>2026-11-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/qwen-4-max.html</loc><lastmod>2026-11-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://locallyuncensored.com/blog/inkling-2-mini-local.html</loc><lastmod>2026-11-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
 </urlset>

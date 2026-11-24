@@ -40,16 +40,17 @@ function measuredRows(): string[] {
 
 describe('the counts of the LU Cloud page', () => {
   it('are written out here a second time', () => {
-    expect(CATALOGUE_COUNTS).toEqual({ chat: 40, image: 24, video: 24 })
+    expect(CATALOGUE_COUNTS).toEqual({ chat: 43, image: 24, video: 24 })
     expect(CLOUD_COUNTED_ON).toBe('2026-10-24')
   })
 
-  it('chat: the 36 measured rows and the four that joined later, the same 40 as the pitch', () => {
+  it('chat: the 36 measured rows and the seven that joined later, the same 43 as the pitch', () => {
     const rows = measuredRows()
     expect(rows).toHaveLength(36)
     expect(new Set(rows).size).toBe(rows.length)
-    // DeepSeek V4.1 Flash, Kimi K3.1 Pro, MiMo V2.6 Pro, Nemotron 3.5 Super VL (catalogue of 24.10.2026).
-    expect(CATALOGUE_COUNTS.chat).toBe(rows.length + 4)
+    // DeepSeek V4.1 Flash, Kimi K3.1 Pro, MiMo V2.6 Pro, Nemotron 3.5 Super VL (catalogue of 24.10.2026),
+    // Qwen 4 Max, Inkling 2 Mini, Inkling 2 Small (24.11.2026).
+    expect(CATALOGUE_COUNTS.chat).toBe(rows.length + 7)
     expect(CATALOGUE_COUNTS.chat).toBe(CLOUD_PITCH.chatModels)
   })
 
@@ -80,7 +81,7 @@ describe('the counts of the LU Cloud page', () => {
     const counts = cloudCountsFor(STORE_PRESETS.open)!
     expect(counts.total).toBe(counts.chat + counts.image + counts.video)
     // 79 until the web catalogue of 24.10.2026 came over (3.1.0), nine more image models since.
-    expect(counts.total).toBe(88)
+    expect(counts.total).toBe(91)
   })
 
   it('the open build names the numbers, the two store builds none before sign in (Play since r56, 18.10.2026)', () => {

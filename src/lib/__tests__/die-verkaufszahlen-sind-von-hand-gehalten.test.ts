@@ -42,7 +42,7 @@ import {
  * sonst faellt es durch.
  */
 const ERWARTET = {
-  chatModels: 40,
+  chatModels: 43,
   measuredChatModels: 36,
   flashModels: 12,
   flashDailyTokens: 500_000,
