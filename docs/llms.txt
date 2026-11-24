@@ -140,7 +140,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
   - Handbook chapter, Settings and troubleshooting: https://locallyuncensored.com/guide/settings-and-troubleshooting/
   - Handbook chapter, FAQ and glossary: https://locallyuncensored.com/guide/faq-and-glossary/
 - Blog (guides, comparisons, release notes): https://locallyuncensored.com/blog/
-- Seedream 5.5 Uncensored in LU Cloud: Text to Image and Editing, Unfiltered: https://locallyuncensored.com/blog/seedream-5-5-uncensored.html
+- Seedream 5.5 in LU Cloud: Text to Image and Editing With Few Filters (the provider can still decline; MiniMax H3 is the uncensored video choice): https://locallyuncensored.com/blog/seedream-5-5-uncensored.html
 - MiniMax H3 Uncensored Video in LU Cloud: Chili, Enhanced, Hyper and Max Compared: https://locallyuncensored.com/blog/minimax-h3-uncensored-video.html
 - GLM 5.3 Flash Uncensored Online: GLM 5.3 Flash Dealigned in LU Cloud: https://locallyuncensored.com/blog/glm-5-3-flash-uncensored.html
 - Qwen 4 Max in LU Cloud: Price, 1M Context, Images, and How It Compares to Qwen 3.8 Max: https://locallyuncensored.com/blog/qwen-4-max.html
