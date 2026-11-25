@@ -435,6 +435,12 @@ export class OllamaProvider implements ProviderClient {
       // and not `true` when the field is absent. openai-provider.ts already
       // works exactly this way.
       supportsTools: Array.isArray(m.capabilities) ? m.capabilities.includes('tools') : undefined,
+      // Ollama's "vision" capability is the fact the composer needs: it is
+      // there exactly when the model was created with its projector (mmproj).
+      // A custom name (a finetune named after itself) no longer reads as blind,
+      // and a vision-family name imported without its projector no longer reads
+      // as seeing. Absent on an older Ollama, so the name heuristic still decides.
+      supportsVision: Array.isArray(m.capabilities) ? m.capabilities.includes('vision') : undefined,
       // K12 (3.0.1): no `unfiltered` here, on purpose but with a real gap
       // behind it. The "No Filter" mark (ModelRowMarks.tsx) only fires for
       // 'full', and only the cloud catalog path (openai-provider.ts

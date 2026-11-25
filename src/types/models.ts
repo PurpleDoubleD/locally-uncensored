@@ -20,6 +20,7 @@ export interface OllamaModel {
   providerName?: string       // Display: "Ollama", "OpenRouter", "Anthropic"
   contextLength?: number      // Known context window size
   supportsTools?: boolean     // Native tool calling support
+  supportsVision?: boolean    // Ollama's "vision" capability (projector loaded)
 }
 
 // Cloud text model (OpenAI-compat or Anthropic) — lighter than OllamaModel
