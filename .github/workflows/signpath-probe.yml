@@ -138,7 +138,7 @@ jobs:
       # Dependencies only: the cache drops the app's own build before it
       # saves (swatinem/rust-cache, src/save.ts and src/cleanup.ts).
       - name: Rust cache
-        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           workspaces: './src-tauri -> target'
 
